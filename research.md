@@ -53,3 +53,5 @@
 本项目使用 Go 编译时的文件映射配置提交身份，使状态提交从 Git 配置读取姓名和邮箱，并包含 `Signed-off-by`。依赖的状态读写、锁定和加密实现由上述后端提供。
 
 [age-encryption](https://github.com/FiloSottile/typage) 提供 JavaScript 的 age 文件加密和解密。GitHub 官方 `@actions/artifact` 提供 artifact 上传、跨运行下载和摘要核验。预览上传的 artifact 为加密文件，执行任务保存经核验的审核记录到私有仓库，支持长期重试。[加密 API](https://github.com/FiloSottile/typage#usage)、[artifact API](https://github.com/actions/toolkit/blob/main/packages/artifact/README.md)
+
+私有仓库中的加密审核和执行记录通过 Git blob API 读取原始字节，接口返回 Base64 编码的 Git 对象内容。[Git blob API](https://docs.github.com/en/rest/git/blobs#get-a-blob)

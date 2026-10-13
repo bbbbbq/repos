@@ -98,6 +98,7 @@ npm run check
 - [申请仓库和修改权限](docs/requesting.md)
 - [配置 GitHub App、状态仓库和加密密钥](docs/setup.md)
 - [执行结果、冲突、导入与恢复](docs/operations.md)
+- [已执行的验证](docs/verification.md)
 - [文档编写规范](docs/documentation-guidelines.md)
 - [贡献流程](CONTRIBUTING.md)
 

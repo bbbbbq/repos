@@ -49,7 +49,7 @@ npm run state:setup
 
 后端通过远程 `locks/gevico/repos/terraform.tfstate` 分支锁定状态。每次状态和记录更新保留独立的 Git 提交，以及从实际 Git 配置读取的 `Signed-off-by`。
 
-Request 使用只读 App 读取状态，将预览记录加密后上传为 Actions artifact。Apply 核验 artifact 所属的受信任工作流、提交和运行次数，核对配置与依赖摘要，将批准记录保存到私有仓库，再执行已批准的操作。artifact 保留 90 天；合并前记录过期时需要重新执行预览。
+Request 使用只读 App 读取状态，将预览记录加密后上传为 Actions artifact。Apply 核验 artifact 所属的受信任工作流、基础代码提交、申请提交和运行次数，核对配置与依赖摘要，将批准记录保存到私有仓库，再执行已批准的操作。artifact 保留 90 天；合并前记录过期时需要重新执行预览。
 
 两个 App 都需要安装到组织的全部仓库，确保可以访问 `repos-state` 和自动创建的目标仓库。
 
