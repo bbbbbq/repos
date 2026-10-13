@@ -1,6 +1,6 @@
 # 管理员配置
 
-仓库的 Check 工作流可以直接运行。Request 和 Apply 使用组织级 GitHub App 及 S3 状态存储。完成本页配置后，设置 `AUTOMATION_ENABLED=true` 并运行 Apply，初始化已应用提交记录。
+仓库的 Check 工作流可以直接运行。Request 和 Apply 使用组织级 GitHub App、私有状态仓库和 GitHub Actions artifacts。完成本页配置后，设置 `AUTOMATION_ENABLED=true` 并运行 Apply，初始化加密状态和已应用提交记录。
 
 ## GitHub App
 
@@ -19,30 +19,39 @@
 
 官方 `actions/create-github-app-token` 在每个任务中获取安装令牌。工作流明确设置 `owner: gevico`，覆盖该 App 安装范围内的仓库。
 
-## S3 和 AWS OIDC
+## 私有状态仓库和加密密钥
 
-准备专用的私有 S3 bucket，开启对象版本记录与服务器端加密。状态路径固定为 `gevico/repos/terraform.tfstate`，状态锁为 `gevico/repos/terraform.tfstate.tflock`，执行记录为 `gevico/repos/applied.json`，审核记录位于 `gevico/repos/reviews/`。
+以组织所有者身份登录 `gh`，在克隆后的管理仓库运行：
 
-创建 GitHub OIDC identity provider，并建立预览和执行两个 IAM role。`aud` 为 `sts.amazonaws.com`，`sub` 限定为管理仓库的实际身份。新建仓库可能使用含有不可变组织与仓库 ID 的 subject，须依据实际仓库的 OIDC 配置填写。
+```bash
+npm ci
+npm run state:setup
+```
 
-先运行仓库的 `Inspect identity` 工作流，读取 `preview` 和 `production` 两个任务摘要中的 `audience` 与 `subject`。工作流只输出必要的身份声明，安装令牌与 OIDC 原始令牌由工作流内部处理。
+程序创建私有 `gevico/repos-state`，初始化 `main`，生成 age X25519 密钥并保存以下配置。状态仓库访问范围为组织所有者和具有相应权限的 App。
 
-预览 role 的信任条件对应 `preview` 环境；执行 role 的信任条件对应 `production` 环境。两个环境的部署分支均限定为 `main`，Request 在 `pull_request_target` 事件的受信任基础分支中执行。[GitHub AWS OIDC 文档](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws)
+| 配置 | 位置 | 用途 |
+| --- | --- | --- |
+| `STATE_AGE_KEY` | `preview` 和 `production` 环境 Secrets | 解密状态及审核记录 |
+| `STATE_AGE_RECIPIENT` | 管理仓库 variable | 加密时使用的 age 公钥 |
+| `STATE_GIT_NAME` | 管理仓库 variable | 从本地 `git config user.name` 取得的提交姓名 |
+| `STATE_GIT_EMAIL` | 管理仓库 variable | 从本地 `git config user.email` 取得的提交邮箱 |
 
-预览 role 的权限：
+密钥的本地备份为 `.work/state-age-key.txt`，文件权限为 `0600`。请将其保存到自己的密码管理器或安全备份位置。重复配置使用已有密钥；仓库已有公钥而本地密钥缺失时，程序要求恢复对应密钥。
 
-- 对 bucket 的 `s3:ListBucket`，限定管理路径前缀。
-- 读取管理路径中的对象与版本。
-- 对 `gevico/repos/reviews/*` 的 `s3:PutObject`，保存审核预览。
+状态后端使用 [terraform-backend-git v0.1.12](https://github.com/plumber-cd/terraform-backend-git/tree/v0.1.12) 的 Git 存储、远程锁和 SOPS/age 加密。后端只在任务运行期间监听 runner 的 `127.0.0.1`，由 Terraform 的 HTTP 后端访问。任务结束后终止后端进程。构建和提交身份配置见 [后端说明](../backend/README.md)。
 
-执行 role 的权限：
+私有状态仓库的文件：
 
-- 对 bucket 的 `s3:ListBucket`，限定管理路径前缀。
-- 读取状态、审核记录和执行记录。
-- 写入状态和 `applied.json`。
-- 对锁文件的读取、写入和删除。
+- `gevico/repos/terraform.tfstate`：SOPS/age 加密的 Terraform 状态。
+- `records/applied.json.age`：age 加密的已应用提交及核验结果。
+- `records/reviews/<PR>/<head>.json.age`：age 加密的已批准申请预览。
 
-配置仓库 variables：`STATE_BUCKET`、`AWS_REGION`、`AWS_PREVIEW_ROLE_ARN`、`AWS_APPLY_ROLE_ARN`。S3 bucket 的名字和区域须对应实际部署资源。
+后端通过远程 `locks/gevico/repos/terraform.tfstate` 分支锁定状态。每次状态和记录更新保留独立的 Git 提交，以及从实际 Git 配置读取的 `Signed-off-by`。
+
+Request 使用只读 App 读取状态，将预览记录加密后上传为 Actions artifact。Apply 核验 artifact 所属的受信任工作流、提交和运行次数，核对配置与依赖摘要，将批准记录保存到私有仓库，再执行已批准的操作。artifact 保留 90 天；合并前记录过期时需要重新执行预览。
+
+两个 App 都需要安装到组织的全部仓库，确保可以访问 `repos-state` 和自动创建的目标仓库。
 
 ## 仓库审核规则
 
@@ -59,7 +68,12 @@ npm run bootstrap -- --configure
 
 ## 初始化自动化
 
-确认 App、Secrets、S3 和 IAM role 配置均已保存，设置仓库 variable `AUTOMATION_ENABLED=true`。首次初始化时 `repositories/` 保持为空。手动运行 Apply 工作流，核验其初始化记录，然后接收目标仓库申请。
+确认 App、环境 Secrets、状态仓库和 variables 均已保存，设置仓库 variable `AUTOMATION_ENABLED=true`。首次初始化时 `repositories/` 保持为空。手动运行 Apply 工作流，核验其初始化记录，然后接收目标仓库申请：
+
+```bash
+gh variable set AUTOMATION_ENABLED --repo gevico/repos --body true
+gh workflow run apply.yml --repo gevico/repos --ref main
+```
 
 后续申请只需提交 PR。上一条已合并申请的 Apply 完成后，新的申请预览才可通过。
 

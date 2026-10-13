@@ -68,9 +68,9 @@ access:
 - **Request**：读取 PR 中的 YAML 数据，检查真实 GitHub 身份、名称和模板，展示变更预览。
 - **Apply**：合并后使用 Terraform 创建仓库、设置默认分支与权限、配置分支规则，并通过 GitHub API 核验。
 
-工作流运行在 GitHub 托管 runner。GitHub App 提供组织访问权限，任务内生成临时令牌。Terraform 状态保存在 S3，状态读写与资源操作都由 Actions 发起。
+工作流运行在 GitHub 托管 runner。GitHub App 提供组织访问权限，任务内生成临时令牌。Terraform 状态使用 SOPS/age 加密，保存在私有仓库 `gevico/repos-state`。PR 预览记录加密保存到 Actions artifacts；执行任务核验记录来源后，将记录保存到私有状态仓库。全部运行和存储使用 GitHub 资源。
 
-管理员先完成 [部署配置](docs/setup.md)。仓库申请开始执行的条件是 `AUTOMATION_ENABLED=true`，以及有效的 App 凭证和 AWS OIDC role。`gevico` 当前使用 GitHub Free；私有目标仓库需要先具备分支保护能力，再更新已核实的组织政策。
+管理员先完成 [部署配置](docs/setup.md)。仓库申请开始执行的条件是 `AUTOMATION_ENABLED=true`，以及有效的 App 凭证、私有状态仓库和加密密钥。`gevico` 当前使用 GitHub Free；私有目标仓库需要先具备分支保护能力，再更新已核实的组织政策。
 
 ## 本地使用
 
@@ -96,7 +96,7 @@ npm run check
 ## 文档与贡献
 
 - [申请仓库和修改权限](docs/requesting.md)
-- [配置 GitHub App、S3 和 OIDC](docs/setup.md)
+- [配置 GitHub App、状态仓库和加密密钥](docs/setup.md)
 - [执行结果、冲突、导入与恢复](docs/operations.md)
 - [文档编写规范](docs/documentation-guidelines.md)
 - [贡献流程](CONTRIBUTING.md)

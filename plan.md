@@ -20,8 +20,8 @@
 - 管理仓库为公开的 `gevico/repos`，默认分支为 `main`，允许通过 fork 提交申请。
 - 目标仓库支持 `public` 和 `private`，默认值为 `public`。公开管理仓库中的名称、描述和权限申请对公众可见；私有目标仓库的代码访问由 GitHub 权限控制。
 - 审核负责人和目标仓库管理员使用组织所有者 `zevorn`，在 CODEOWNERS 和 `policy.yml` 中配置。组织已有团队由 `allowed_teams` 指定，团队管理员授权由 `administrator_teams` 配置。
-- Terraform 状态保存到 AWS S3，开启对象版本记录和加密，使用 `use_lockfile=true`。S3 提供状态持久化与锁定，所有状态读写由 Actions 发起。AWS 访问通过 GitHub OIDC 获取临时凭证。[S3 后端](https://developer.hashicorp.com/terraform/language/backend/s3)、[AWS OIDC 配置](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws)
-- 部署参数包括 AWS 账户、区域、S3 bucket、IAM role、GitHub App Client ID 和私钥。官方认证 Action 自动取得安装令牌。`Inspect identity` 工作流提供实际 AWS OIDC subject，供信任政策配置使用。
+- Terraform 状态由 `terraform-backend-git v0.1.12` 使用 SOPS/age 加密，保存到私有 `gevico/repos-state`。远程 Git 锁分支提供原子锁定，Git 提交保存版本。后端运行在 Actions runner 内，Terraform 通过本地 HTTP 访问。[Git 后端](https://github.com/plumber-cd/terraform-backend-git/tree/v0.1.12)、[HTTP 后端](https://developer.hashicorp.com/terraform/language/backend/http)
+- 部署参数包括 GitHub App Client ID、私钥、age 密钥、公钥及状态提交身份。官方认证 Action 自动取得安装令牌。全部运行和持久存储使用 GitHub 资源。
 
 ## 配置格式与管理范围
 
@@ -71,7 +71,7 @@ flowchart TD
 
 检查实际用户、团队和模板是否存在，判断目标名称是否与已登记或未登记仓库冲突。外部协作者须满足组织政策；预览区分直接授权和等待接受的邀请。
 
-预览任务使用只读 GitHub App。预览 S3 role 可以读取状态，并向限定的 `reviews/` 路径写入审核记录。完整 Terraform 状态保留在受限的 S3 中；PR 只展示本次申请相关的资源操作。`preview` 环境将凭证访问与部署分支限定为受信任的 `main` 上下文。
+预览任务使用只读 GitHub App 读取私有状态仓库，并将 age 加密的审核记录上传为 Actions artifact。完整 Terraform 状态保留在私有仓库中；PR 展示本次申请相关的资源操作。`preview` 环境将凭证访问与部署分支限定为受信任的 `main` 上下文。
 
 将校验与预览结果关联到 PR 的 head SHA，发布必需检查。预览记录包含 head SHA、base SHA、配置摘要、状态版本和依赖版本。提交更新后，重新执行检查并使原审核失效。
 
@@ -86,7 +86,7 @@ flowchart TD
 `apply.yml` 由 `main` 的 `push` 事件触发。处理步骤如下：
 
 1. 读取合并提交，确认关联 PR 和已通过的检查，重复执行配置及政策校验。
-2. 获取写入 GitHub App 的临时令牌和 S3 写入 role，锁定 Terraform 状态。
+2. 获取写入 GitHub App 的临时令牌，核验 Actions 审核 artifact 的工作流来源、提交、运行次数和内容，将加密审核记录保存到私有仓库，锁定 Terraform 状态。
 3. 刷新 GitHub 实际状态，生成执行计划，检查计划只涉及已批准配置的资源和字段。
 4. 创建仓库并初始化分支；将默认分支设置为 `main`。
 5. 设置管理团队、申请团队和个人协作者的权限。
@@ -96,6 +96,8 @@ flowchart TD
 普通创建使用 `github_repository` 和 `auto_init`；模板创建使用该资源的 `template` 配置。默认分支使用 `github_branch_default`，等待分支设置完成后再添加保护规则。[仓库资源](https://github.com/integrations/terraform-provider-github/blob/main/docs/resources/repository.md)、[默认分支资源](https://github.com/integrations/terraform-provider-github/blob/main/docs/resources/branch_default.md)
 
 团队和个人权限统一使用 `github_repository_collaborators` 管理直接授权清单，包含固定管理团队和申请配置。权限移除或角色调整会在后续 PR 中展示并执行。[权限资源](https://github.com/integrations/terraform-provider-github/blob/main/docs/resources/repository_collaborators.md)
+
+持续管理的仓库属性为名称、描述、可见性和主题。合并方式及合并提交的文本设置由 GitHub 仓库设置管理，Terraform 对这些字段使用 `ignore_changes`，保证只读 App 的预览范围与配置字段一致。
 
 实际有效权限由组织角色、组织默认权限、团队继承和直接授权共同决定。报告同时说明直接授予的角色与可查询的有效权限，外部用户的待接受邀请单独记录。
 
@@ -108,14 +110,14 @@ flowchart TD
 - 读取私钥放在 `preview` 环境的 secrets 中，该环境的可部署分支限定为 `main`。
 - 创建及权限设置使用独立的写入 GitHub App，授予需要的仓库 `Administration`、`Contents` 和组织 `Members` 权限，安装范围覆盖受管理的新仓库。
 - 写入私钥放在 `production` 环境的 secrets 中，该环境的可部署分支限定为 `main`。正常执行的批准来自 PR 审核和合并。
-- `GITHUB_TOKEN` 用于发布管理仓库的检查结果和执行报告。AWS OIDC role 的信任条件限定实际管理仓库及工作流环境，并核验新建仓库使用的实际 subject 格式。
+- `GITHUB_TOKEN` 用于发布管理仓库的检查结果、执行报告和访问 Actions artifacts。age 私钥保存在 `preview` 和 `production` 环境 Secrets，公钥保存在仓库 variable。私钥的本地备份使用 `0600` 权限并排除版本管理。
 - 依赖和 Actions 固定版本或提交 SHA；带凭证的任务执行受信任的管理程序。
 
-GitHub App 权限根据所选 Provider 的实际读写行为逐项验证，PR 预览保持只读；API 字段读取与计划生成使用一致的已管理字段范围。[GitHub App 认证](https://github.com/integrations/terraform-provider-github/blob/main/docs/index.md)、[AWS OIDC subject 条件](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws#configuring-the-role-and-trust-policy)
+GitHub App 权限根据所选 Provider 的实际读写行为逐项验证，PR 预览保持只读；API 字段读取与计划生成使用一致的已管理字段范围。[GitHub App 认证](https://github.com/integrations/terraform-provider-github/blob/main/docs/index.md)
 
 ### 并发和重复执行
 
-组织写入任务使用固定 concurrency group，保留正在执行的任务，并启用 S3 状态锁。执行前核验待处理提交顺序和已成功应用的提交记录，过时任务只报告状态。
+组织写入任务使用固定 concurrency group，保留正在执行的任务，并启用 Git 后端远程锁。执行前核验待处理提交顺序和私有仓库中已成功应用的提交记录，过时任务终止执行。
 
 PR 的必需检查确认其 base SHA 已成功应用。上一条合并的配置尚在执行或执行失败时，后续申请保持等待；上一条执行完成后，通过 `workflow_dispatch` 重新检查待合并 PR，并核验所读取的 PR head SHA。严格的分支更新规则保证合并的申请使用当前配置基础。
 
@@ -129,7 +131,7 @@ PR 的必需检查确认其 base SHA 已成功应用。上一条合并的配置�
 - GitHub 返回临时错误或限流：按 API 返回的等待信息重试；达到工作流时限后报告失败并保留可重新执行的状态。
 - 发现状态与实际仓库关系缺失：通过管理员维护流程核验并导入资源，保持仓库身份可追溯。
 - 配置条目删除与资源销毁：配置校验拒绝删除，仓库资源设置 `prevent_destroy`，执行计划检查拒绝仓库删除和替换操作。
-- 状态文件恢复：根据 S3 版本记录选择经核验的状态，重新读取 GitHub 实际状态后生成计划。
+- 状态文件恢复：根据私有仓库的 Git 版本选择经核验的加密状态，使用对应 age 密钥解密，重新读取 GitHub 实际状态后生成计划。
 
 ## 验收条件
 
@@ -139,9 +141,9 @@ PR 的必需检查确认其 base SHA 已成功应用。上一条合并的配置�
 - **AC-4 权限可以设置和撤销**：使用真实团队、组织成员及允许的外部协作者验证授予、角色修改和撤销；核验直接权限、继承权限和邀请状态，未知身份被拒绝。
 - **AC-5 重复执行可以恢复**：重新执行同一已成功提交得到无变更结果；权限设置因真实授权配置不足失败后，修复凭证配置并重新执行，完成剩余授权且保持同一仓库身份。
 - **AC-6 同名和删除可以阻止**：未登记的真实同名仓库触发冲突检查；删除配置或计划出现仓库替换时被拒绝。管理员导入既有仓库后，可正常生成权限变更计划。
-- **AC-7 并发与状态能够保持一致**：提交有真实配置变更的多个 PR，核验前一项执行状态、后一项检查状态及 S3 锁定行为，最终资源与已合并配置一致。
+- **AC-7 并发与状态能够保持一致**：提交有真实配置变更的多个 PR，核验前一项执行状态、后一项检查状态及 Git 后端锁定行为，最终资源与已合并配置一致。
 - **AC-8 报告可以核实**：成功报告中的仓库链接、属性、直接权限和邀请状态与 GitHub API 一致；失败报告列出未完成操作及对应工作流记录，成功结果只在核验通过后发布。
-- **AC-9 操作由 GitHub Actions 完成**：校验、创建、授权、恢复和核验记录均对应 GitHub 托管 runner 的工作流执行；GitHub App 关闭 Webhook，通过任务中的安装令牌完成认证。S3 保存持久状态，任务执行由 Actions 承担。
+- **AC-9 操作由 GitHub Actions 完成**：校验、创建、授权、恢复和核验记录均对应 GitHub 托管 runner 的工作流执行；GitHub App 关闭 Webhook，通过任务中的安装令牌完成认证。GitHub 私有仓库保存加密状态与执行记录，Actions artifacts 保存加密预览，任务执行由 Actions 承担。
 - **AC-10 自然语言申请和文档可以使用**：克隆仓库后，助手可以发现 `.agents/skills/repo-request/SKILL.md`，根据自然语言生成合法 YAML 并完成校验。README 提供申请入口、配置示例、流程图和操作导航，文档规范约束字段、命令、来源与排版。必要身份缺失时补充信息，授权角色以真实政策为准。
 
 验证使用真实 GitHub 仓库、团队、账户、邀请及 Terraform 状态。实现完成后运行必要测试和完整流程，依据实际结果修正问题。将具有后续复用价值的配置校验、权限管理和执行恢复测试纳入版本管理；一次性账户及部署检查作为执行记录保存。
@@ -155,7 +157,7 @@ PR 的必需检查确认其 base SHA 已成功应用。上一条合并的配置�
 - `terraform/`：Provider、仓库资源、默认分支、直接授权清单、分支规则及状态后端配置。
 - `.github/workflows/request.yml`：PR 检查及只读预览。
 - `.github/workflows/apply.yml`：合并后创建、权限管理及核验。
-- `.github/workflows/identity.yml`：输出实际 OIDC 身份声明，供 AWS role 的信任条件使用。
+- `backend/`：Git 后端的提交身份配置和依赖许可证。
 - `.agents/skills/repo-request/`：自然语言申请 skill 及其界面元数据。
 - `.github/CODEOWNERS`：管理团队审核范围。
 - `.github/PULL_REQUEST_TEMPLATE.md`：仓库用途、维护负责人和权限申请说明。
@@ -167,7 +169,7 @@ PR 的必需检查确认其 base SHA 已成功应用。上一条合并的配置�
 
 ## 依赖与实施顺序
 
-1. **确定管理仓库和部署参数**：确认 `gevico/repos` 的可见性、`main` 分支、审核团队、现有仓库及权限来源，填写 AWS 和 GitHub App 参数。产生部署配置说明。
+1. **确定管理仓库和部署参数**：确认 `gevico/repos` 的可见性、`main` 分支、审核团队、现有仓库及权限来源，配置私有状态仓库、age 密钥和 GitHub App 参数。产生部署配置说明。
 2. **建立配置契约**：实现 Schema、政策、申请模板及 YAML 校验程序。产生 AC-1 的验证证据。
 3. **建立 Terraform 资源定义**：实现仓库、默认分支、直接授权和分支规则的映射，固定依赖版本，配置状态存储和销毁限制。依赖配置契约。
 4. **建立 PR 检查**：实现受信任代码读取申请数据、只读预览、真实身份核验及提交关联。依赖配置契约、Provider 资源和只读部署凭证。

@@ -14,27 +14,23 @@ export async function run(command, args, options = {}) {
   }
 }
 
-export async function prepareTerraform(catalog, policy, { local = false } = {}) {
+export async function prepareTerraform(catalog, policy, store) {
   const directory = path.join(work, 'terraform');
   await fs.mkdir(directory, { recursive: true });
   for (const filename of ['versions.tf', 'variables.tf', 'main.tf', 'outputs.tf', '.terraform.lock.hcl']) {
     await fs.copyFile(path.join(root, 'terraform', filename), path.join(directory, filename));
   }
-  if (local) throw new Error('Use the isolated integration root for local backend verification');
   await writeJson(path.join(directory, 'requests.auto.tfvars.json'), terraformValues(catalog, policy));
-  const bucket = process.env.STATE_BUCKET;
-  const region = process.env.AWS_REGION;
-  if (!bucket || !region) throw new Error('STATE_BUCKET and AWS_REGION must be configured');
-  await run('terraform', ['init', '-input=false', '-lockfile=readonly', `-backend-config=bucket=${bucket}`, `-backend-config=region=${region}`, '-backend-config=key=gevico/repos/terraform.tfstate', '-backend-config=encrypt=true', '-backend-config=use_lockfile=true'], { cwd: directory });
-  return directory;
+  await run('terraform', ['init', '-reconfigure', '-input=false', '-lockfile=readonly'], { cwd: directory, env: store.env });
+  return { directory, env: store.env };
 }
 
-export async function terraformPlan(directory, { readOnly = false } = {}) {
+export async function terraformPlan({ directory, env }, { readOnly = false } = {}) {
   const plan = path.join(directory, 'request.tfplan');
-  await run('terraform', ['plan', '-input=false', '-no-color', ...(readOnly ? ['-lock=false'] : ['-lock-timeout=5m']), `-out=${plan}`], { cwd: directory });
-  return JSON.parse(await run('terraform', ['show', '-json', plan], { cwd: directory }));
+  await run('terraform', ['plan', '-input=false', '-no-color', ...(readOnly ? ['-lock=false'] : ['-lock-timeout=5m']), `-out=${plan}`], { cwd: directory, env });
+  return JSON.parse(await run('terraform', ['show', '-json', plan], { cwd: directory, env }));
 }
 
-export async function terraformApply(directory) {
-  return run('terraform', ['apply', '-input=false', '-no-color', '-lock-timeout=5m', path.join(directory, 'request.tfplan')], { cwd: directory });
+export async function terraformApply({ directory, env }) {
+  return run('terraform', ['apply', '-input=false', '-no-color', '-lock-timeout=5m', path.join(directory, 'request.tfplan')], { cwd: directory, env });
 }

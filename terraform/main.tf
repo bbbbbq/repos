@@ -18,7 +18,17 @@ resource "github_repository" "managed" {
 
   lifecycle {
     prevent_destroy = true
-    ignore_changes  = [auto_init, template]
+    ignore_changes = [
+      auto_init,
+      template,
+      allow_merge_commit,
+      allow_rebase_merge,
+      allow_squash_merge,
+      merge_commit_message,
+      merge_commit_title,
+      squash_merge_commit_message,
+      squash_merge_commit_title,
+    ]
   }
 }
 

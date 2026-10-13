@@ -3,12 +3,14 @@ import path from 'node:path';
 import { root, work, loadCatalog, loadPolicy, checkTransition, changedNames, digest, writeJson } from './config.mjs';
 import { github, remoteCatalog, inspectCatalog, verifyCatalog, comment, status } from './github.mjs';
 import { StateStore } from './state.mjs';
-import { prepareTerraform, terraformPlan, terraformApply, run } from './runtime.mjs';
+import { prepareTerraform, terraformPlan, terraformApply } from './runtime.mjs';
 import { authorizePlan, describeIntents } from './plan-policy.mjs';
+import { saveReview, loadReview } from './reviews.mjs';
 
 const command = process.argv[2];
 let pullRequest;
 let control;
+let store;
 
 async function input() {
   const policy = await loadPolicy();
@@ -40,12 +42,12 @@ async function request() {
   const after = await remoteCatalog(control, owner, repo, head, path.join(work, 'head'));
   checkTransition(before.catalog, after.catalog);
   const changed = changedNames(before.catalog, after.catalog);
-  const store = new StateStore();
+  store = await StateStore.open();
   const applied = await store.get('applied.json', true);
-  if (applied?.data.sha !== pullRequest.base.sha) throw new Error('The base commit has not finished applying; refresh this PR after the preceding workflow succeeds');
+  if (applied?.data.sha !== pullRequest.base.sha) throw new Error('The base commit has not finished applying; rerun preview after Apply succeeds');
   const stateBefore = await store.terraformState();
   await inspectCatalog(reader, after.catalog, after.policy, stateBefore.names);
-  const directory = await prepareTerraform(after.catalog, after.policy);
+  const directory = await prepareTerraform(after.catalog, after.policy, store);
   const plan = await terraformPlan(directory, { readOnly: true });
   const intents = authorizePlan(plan, after.catalog, after.policy, changed);
   const stateAfter = await store.terraformState();
@@ -54,13 +56,13 @@ async function request() {
   if (latest.head.sha !== head || latest.base.sha !== pullRequest.base.sha) throw new Error('Pull request changed during preview; rerun validation');
   const lock = await fs.readFile(path.join(root, 'terraform/.terraform.lock.hcl'), 'utf8');
   const review = { number, head, base: pullRequest.base.sha, config_digest: digest(after.catalog), policy_digest: digest(after.policy), lock_digest: digest(lock), state_version: stateBefore.version, changed, intents };
-  await store.put(`reviews/${number}/${head}.json`, review);
+  await saveReview(review);
   await comment(control, owner, repo, number, `### Repository request\n\nCommit: \`${head}\`\n\n${describeIntents(intents)}\n\nMerge this PR after the configuration and these changes have been approved.`);
   await status(control, owner, repo, head, 'success', 'Repository configuration and execution preview validated', 'request/check');
 }
 
 async function apply() {
-  const { event, policy, owner, repo } = await input();
+  const { policy, owner, repo } = await input();
   if (process.env.GITHUB_REF !== 'refs/heads/main') throw new Error('Apply is restricted to main');
   if (process.env.AUTOMATION_ENABLED !== 'true') throw new Error('Organization automation is not configured; administrator must complete docs/setup.md');
   const client = github();
@@ -70,7 +72,7 @@ async function apply() {
   const latest = (await control.rest.repos.getCommit({ owner, repo, ref: 'main' })).data.sha;
   if (sha !== latest) throw new Error('This run targets an outdated commit; rerun the latest main workflow');
   const { catalog } = await loadCatalog();
-  const store = new StateStore();
+  store = await StateStore.open();
   const state = await store.terraformState();
   const applied = await store.get('applied.json', true);
   const commits = await control.paginate(control.rest.repos.listPullRequestsAssociatedWithCommit, { owner, repo, commit_sha: sha });
@@ -85,17 +87,19 @@ async function apply() {
     checkTransition(before.catalog, catalog);
     const changed = changedNames(before.catalog, catalog);
     if (changed.length) {
-      review = (await store.get(`reviews/${pullRequest.number}/${pullRequest.head.sha}.json`)).data;
+      const saved = await store.get(`reviews/${pullRequest.number}/${pullRequest.head.sha}.json`, true);
+      review = saved?.data ?? await loadReview(control, owner, repo, pullRequest.number, pullRequest.head.sha, base);
       const lock = await fs.readFile(path.join(root, 'terraform/.terraform.lock.hcl'), 'utf8');
-      if (review.base !== base || review.config_digest !== digest(catalog) || review.policy_digest !== digest(policy) || review.lock_digest !== digest(lock)) throw new Error('Merged configuration differs from the validated PR');
+      if (review.number !== pullRequest.number || review.head !== pullRequest.head.sha || review.base !== base || review.config_digest !== digest(catalog) || review.policy_digest !== digest(policy) || review.lock_digest !== digest(lock)) throw new Error('Merged configuration differs from the validated PR');
       if (applied?.data.sha !== review.base && applied?.data.sha !== sha) throw new Error('The preceding approved commit has not finished applying');
+      if (!saved) await store.put(`reviews/${pullRequest.number}/${pullRequest.head.sha}.json`, review);
     }
   }
   await inspectCatalog(client, catalog, policy, state.names);
-  const directory = await prepareTerraform(catalog, policy);
+  const directory = await prepareTerraform(catalog, policy, store);
   const plan = await terraformPlan(directory);
   const intents = authorizePlan(plan, catalog, policy, review?.changed ?? [], review?.intents ?? []);
-  if (intents.length) await terraformApply(directory);
+  await terraformApply(directory);
   const result = await verifyCatalog(client, catalog, policy);
   await store.put('applied.json', { sha, repositories: result, applied_at: new Date().toISOString(), run_id: process.env.GITHUB_RUN_ID });
   await writeJson(path.join(work, 'result.json'), result);
@@ -127,4 +131,6 @@ try {
     await comment(control, policy.organization, policy.management_repository, pullRequest.number, `### ${command === 'request' ? 'Request validation' : 'Repository automation'} failed\n\n${error.message}\n\nInspect the Actions run and [recovery guide](https://github.com/gevico/repos/blob/main/docs/operations.md).`).catch(() => {});
   }
   process.exitCode = 1;
+} finally {
+  if (store) await store.close();
 }

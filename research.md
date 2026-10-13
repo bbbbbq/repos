@@ -1,6 +1,6 @@
 # gevico 组织仓库创建与权限自动化调研
 
-调研日期：2026 年 10 月 13 日。
+调研日期：2026 年 10 月 14 日。
 
 ## ipdxco/github-as-code 模板
 
@@ -43,5 +43,13 @@
 - **资源与现有配置**：初始化 Terraform 后端和已应用提交记录；既有仓库经过管理员核验与导入后加入管理清单。个人与团队直接授权统一使用 `github_repository_collaborators`。[权限资源说明](https://github.com/integrations/terraform-provider-github/blob/v6.13.0/docs/resources/repository_collaborators.md)
 - **审核要求**：在管理仓库配置必需的 PR 审核与检查，通过分支保护要求审核通过后才能合并。公开组织仓库可使用 GitHub Free 的分支保护；私有组织仓库使用该功能需要相应付费套餐。[GitHub 分支保护说明](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches)
 - **GitHub 凭证**：模板采用分别用于读取和写入的 GitHub App，并要求安装到组织的全部仓库。GitHub Actions 自动提供的 `GITHUB_TOKEN` 权限限定在工作流所在仓库；组织仓库创建和跨仓库授权使用另外配置的 GitHub App 凭证。[模板凭证配置](https://github.com/ipdxco/github-as-code/blob/master/docs/SETUP.md#github-app)、[GITHUB_TOKEN 权限范围](https://docs.github.com/en/actions/concepts/security/github_token)
-- **状态存储**：使用 S3 保存 Terraform 状态，启用原生 `use_lockfile`，通过 GitHub OIDC 获取临时 AWS 凭证。[S3 后端说明](https://developer.hashicorp.com/terraform/language/backend/s3)
+- **状态存储**：使用 `terraform-backend-git v0.1.12` 将 SOPS/age 加密状态保存到私有 `gevico/repos-state`，通过远程 Git 锁分支锁定状态。PR 预览记录使用 age 加密后上传到 Actions artifacts，执行前核验受信任工作流的来源与内容。[Git 后端实现](https://github.com/plumber-cd/terraform-backend-git/tree/v0.1.12)、[Actions artifact SDK](https://github.com/actions/toolkit/tree/main/packages/artifact)
 - **持续管理范围**：管理已登记仓库的属性、默认分支、直接个人与团队授权及分支规则。预览与执行均读取实际 GitHub 状态，并检查执行变更与审核目标的一致性。初始化模板和仓库身份保持稳定。
+
+## GitHub 资源中的持久状态
+
+[plumber-cd/terraform-backend-git](https://github.com/plumber-cd/terraform-backend-git) 的 `v0.1.12` 于 2026 年 9 月 19 日发布，项目采用 Apache-2.0 许可证，提供 Terraform HTTP 后端、Git 远程锁定、状态版本和 SOPS/age 加密。后端可在 runner 内运行，任务结束后终止。[版本发布](https://github.com/plumber-cd/terraform-backend-git/releases/tag/v0.1.12)、[锁定实现](https://github.com/plumber-cd/terraform-backend-git/blob/v0.1.12/storages/git/client.go)、[age 配置](https://github.com/plumber-cd/terraform-backend-git/blob/v0.1.12/crypt/sops/age.go)
+
+本项目使用 Go 编译时的文件映射配置提交身份，使状态提交从 Git 配置读取姓名和邮箱，并包含 `Signed-off-by`。依赖的状态读写、锁定和加密实现由上述后端提供。
+
+[age-encryption](https://github.com/FiloSottile/typage) 提供 JavaScript 的 age 文件加密和解密。GitHub 官方 `@actions/artifact` 提供 artifact 上传、跨运行下载和摘要核验。预览上传的 artifact 为加密文件，执行任务保存经核验的审核记录到私有仓库，支持长期重试。[加密 API](https://github.com/FiloSottile/typage#usage)、[artifact API](https://github.com/actions/toolkit/blob/main/packages/artifact/README.md)

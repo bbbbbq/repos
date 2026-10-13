@@ -17,6 +17,11 @@ test('privileged request workflow executes trusted base code and a read-only app
   assert.equal(authentication.with['permission-administration'], 'read');
   assert.equal(authentication.with['permission-contents'], 'read');
   assert.ok(steps.every((step) => !step.run?.includes('github.event.pull_request.head')));
+  assert.equal(workflow.permissions.actions, 'read');
+  const automation = steps.find((step) => step.uses === './.github/actions/automation');
+  assert.equal(automation.with.command, 'request');
+  assert.equal(automation.env.STATE_AGE_KEY, '${{ secrets.STATE_AGE_KEY }}');
+  assert.equal(workflow.jobs.request.env.STATE_AGE_KEY, undefined);
 });
 
 test('apply workflow restricts credentials and serializes writes on the approved branch', async () => {
@@ -27,4 +32,9 @@ test('apply workflow restricts credentials and serializes writes on the approved
   const authentication = workflow.jobs.apply.steps.find((step) => step.uses?.startsWith('actions/create-github-app-token@'));
   assert.equal(authentication.with['permission-administration'], 'write');
   assert.equal(authentication.with['permission-members'], 'read');
+  assert.equal(authentication.with['permission-contents'], 'write');
+  const automation = workflow.jobs.apply.steps.find((step) => step.uses === './.github/actions/automation');
+  assert.equal(automation.with.command, 'apply');
+  assert.equal(automation.env.STATE_AGE_KEY, '${{ secrets.STATE_AGE_KEY }}');
+  assert.equal(workflow.jobs.apply.env.STATE_AGE_KEY, undefined);
 });
