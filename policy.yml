@@ -1,0 +1,15 @@
+organization: gevico
+management_repository: repos
+default_branch: main
+administrator_users:
+  - zevorn
+administrator_teams: []
+allowed_teams:
+  - ai_infra-pigpig-runrun
+allowed_templates: []
+reserved_names:
+  - repos
+  - repos-state
+  - github
+private_branch_protection: false
+require_pull_request_reviews: true
