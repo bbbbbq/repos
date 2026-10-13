@@ -19,7 +19,7 @@ try {
   const artifact = await client.uploadArtifact(`encrypted-review-verification-${process.env.GITHUB_RUN_ATTEMPT}`, [filename], directory, { retentionDays: 1, compressionLevel: 0 });
   assert.ok(artifact.id && artifact.digest);
   const downloaded = path.join(directory, 'download');
-  const result = await client.downloadArtifact(artifact.id, { path: downloaded, expectedHash: artifact.digest, findBy: { token: process.env.CONTROL_TOKEN, workflowRunId: Number(process.env.GITHUB_RUN_ID), repositoryOwner, repositoryName } });
+  const result = await client.downloadArtifact(artifact.id, { path: downloaded, expectedHash: `sha256:${artifact.digest}`, findBy: { token: process.env.CONTROL_TOKEN, workflowRunId: Number(process.env.GITHUB_RUN_ID), repositoryOwner, repositoryName } });
   assert.equal(result.digestMismatch, false);
   assert.deepEqual(await decryptReview(await fs.readFile(path.join(downloaded, 'review.age')), identity), record);
   console.log('Verified encrypted review upload, authenticated REST download, digest and age decryption');

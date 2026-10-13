@@ -39,9 +39,10 @@ export async function loadReview(client, owner, repo, number, head, base) {
     const artifacts = await client.paginate(client.rest.actions.listWorkflowRunArtifacts, { owner, repo, run_id: run.id, per_page: 100 });
     const artifact = artifacts.find((item) => item.name === artifactName(number, head, run.run_attempt) && !item.expired);
     if (!artifact) continue;
+    if (!artifact.digest) throw new Error('GitHub must provide the review artifact digest');
     const directory = path.join(work, `download-review-${run.id}`);
     await fs.rm(directory, { recursive: true, force: true });
-    const result = await new DefaultArtifactClient().downloadArtifact(artifact.id, { path: directory, expectedHash: artifact.digest?.replace(/^sha256:/, ''), findBy: { token: process.env.CONTROL_TOKEN, workflowRunId: run.id, repositoryOwner: owner, repositoryName: repo } });
+    const result = await new DefaultArtifactClient().downloadArtifact(artifact.id, { path: directory, expectedHash: artifact.digest, findBy: { token: process.env.CONTROL_TOKEN, workflowRunId: run.id, repositoryOwner: owner, repositoryName: repo } });
     if (result.digestMismatch) throw new Error('Review artifact digest does not match GitHub');
     const review = await decryptReview(await fs.readFile(path.join(directory, 'review.age')));
     if (review.number !== number || review.head !== head || review.base !== base || String(review.run_id) !== String(run.id) || String(review.run_attempt) !== String(run.run_attempt)) throw new Error('Review artifact does not match its trusted workflow run');

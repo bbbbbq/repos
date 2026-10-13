@@ -85,8 +85,10 @@ export class StateStore {
   async get(key, optional = false) {
     try {
       const { data } = await this.client.rest.repos.getContent({ owner: 'gevico', repo: 'repos-state', path: `records/${key}.age`, ref: 'main' });
-      if (data.type !== 'file' || data.encoding !== 'base64') throw new Error('Git state record must be an ordinary file');
-      return { data: await decryptReview(Buffer.from(data.content, 'base64')), version: data.sha };
+      if (data.type !== 'file') throw new Error('Git state record must be an ordinary file');
+      const { data: blob } = await this.client.rest.git.getBlob({ owner: 'gevico', repo: 'repos-state', file_sha: data.sha });
+      if (blob.encoding !== 'base64') throw new Error('Git record blob must use base64 encoding');
+      return { data: await decryptReview(Buffer.from(blob.content, 'base64')), version: data.sha };
     } catch (error) {
       if (optional && error.status === 404) return null;
       throw error;
