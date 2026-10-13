@@ -36,6 +36,7 @@ async function request() {
   }
   if (files.some((file) => !file.filename.startsWith('repositories/'))) throw new Error('Repository requests must be submitted separately from management code or policy changes');
   if (requests.some((file) => ['removed', 'renamed'].includes(file.status))) throw new Error('Removing or renaming repository requests is prohibited');
+  if (process.env.GITHUB_SHA !== pullRequest.base.sha) throw new Error('Trusted workflow source differs from the current PR base; rerun Request on main');
   if (process.env.AUTOMATION_ENABLED !== 'true') throw new Error('Organization automation is not configured; administrator must complete docs/setup.md');
   const reader = github();
   const before = await remoteCatalog(control, owner, repo, pullRequest.base.sha, path.join(work, 'base'));
@@ -90,7 +91,7 @@ async function apply() {
       const saved = await store.get(`reviews/${pullRequest.number}/${pullRequest.head.sha}.json`, true);
       review = saved?.data ?? await loadReview(control, owner, repo, pullRequest.number, pullRequest.head.sha, base);
       const lock = await fs.readFile(path.join(root, 'terraform/.terraform.lock.hcl'), 'utf8');
-      if (review.number !== pullRequest.number || review.head !== pullRequest.head.sha || review.base !== base || review.config_digest !== digest(catalog) || review.policy_digest !== digest(policy) || review.lock_digest !== digest(lock)) throw new Error('Merged configuration differs from the validated PR');
+      if (review.number !== pullRequest.number || review.head !== pullRequest.head.sha || review.base !== base || review.source_sha !== base || review.config_digest !== digest(catalog) || review.policy_digest !== digest(policy) || review.lock_digest !== digest(lock)) throw new Error('Merged configuration differs from the validated PR');
       if (applied?.data.sha !== review.base && applied?.data.sha !== sha) throw new Error('The preceding approved commit has not finished applying');
       if (!saved) await store.put(`reviews/${pullRequest.number}/${pullRequest.head.sha}.json`, review);
     }
