@@ -3,7 +3,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { Octokit } from '@octokit/rest';
 import { retry } from '@octokit/plugin-retry';
-import { root, parseYaml, validateRequest, loadPolicy, effectiveAccess, isRepositoryRequest } from './config.mjs';
+import { root, parseYaml, validateRequest, loadPolicy, effectiveAccess, isRepositoryRequest, repositoryStatus, repositoryMode, defaultBranch } from './config.mjs';
 
 const Client = Octokit.plugin(retry);
 export function github(token = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN) {
@@ -27,6 +27,7 @@ export async function remoteCatalog(client, owner, repo, ref, directory) {
   const catalog = {};
   await fs.mkdir(path.join(directory, 'repositories'), { recursive: true });
   for (const entry of tree.tree.filter((item) => item.path.startsWith('repositories/'))) {
+    if (entry.path === 'repositories/archive' && entry.type === 'tree' && entry.mode === '040000') continue;
     if (entry.path === 'repositories/.gitkeep' && entry.type === 'blob' && entry.mode === '100644') continue;
     if (!isRepositoryRequest(entry.path) || entry.type !== 'blob' || entry.mode !== '100644') {
       throw new Error(`${entry.path}: request files must be ordinary YAML files`);
@@ -35,23 +36,48 @@ export async function remoteCatalog(client, owner, repo, ref, directory) {
     const { data } = await client.rest.git.getBlob({ owner, repo, file_sha: entry.sha });
     if (data.encoding !== 'base64') throw new Error(`${entry.path}: unexpected blob encoding`);
     const text = Buffer.from(data.content, 'base64').toString('utf8');
-    const request = await validateRequest(parseYaml(text, entry.path), policy, path.basename(entry.path));
+    const request = await validateRequest(parseYaml(text, entry.path), policy, entry.path);
+    if (Object.keys(catalog).some((name) => name.toLowerCase() === request.name.toLowerCase())) throw new Error(`${entry.path}: duplicate repository name`);
     catalog[request.name] = request;
+    await fs.mkdir(path.dirname(path.join(directory, entry.path)), { recursive: true });
     await fs.writeFile(path.join(directory, entry.path), text);
   }
   return { policy, catalog };
 }
 
-export async function inspectCatalog(client, catalog, policy, tracked = null) {
+export async function inspectCatalog(client, catalog, policy, state = null, records = []) {
   const users = new Set();
   const teams = new Set();
+  const ids = [];
   for (const request of Object.values(catalog)) {
+    const desiredStatus = repositoryStatus(request);
+    const tracked = state?.repositories?.[request.name];
+    const recorded = records.find((item) => item.name === request.name);
+    const expectedIds = [request.repository_id, tracked?.id, recorded?.id].filter((id) => id !== undefined);
+    if (expectedIds.some((id) => !Number.isSafeInteger(id) || id <= 0) || new Set(expectedIds).size > 1) throw new Error(`${request.name}: repository ID differs from the registered target`);
+    if (state && desiredStatus !== 'active' && !recorded) throw new Error(`${request.name}: an applied repository ID record is required for lifecycle operations`);
+    const expectedId = expectedIds[0];
+    const repository = await findRepository(client, policy.organization, request.name);
+    if (repository && repository.name !== request.name) throw new Error(`${request.name}: use the canonical GitHub repository name ${repository.name}`);
+    if (repository && expectedId && repository.id !== expectedId) throw new Error(`${request.name}: repository ID differs from GitHub; same-name replacement is prohibited`);
+    const importing = repositoryMode(request) === 'existing' && request.repository_id || repositoryMode(request) === 'fork' && recorded?.origin === 'fork-init';
+    if (state && repository && !tracked && !importing) throw new Error(`${request.name}: name already exists outside Terraform state; administrator import required`);
+    if (recorded?.status === 'deleted' && repository) throw new Error(`${request.name}: a repository has reappeared after deletion`);
+    if (!repository && expectedId) {
+      let byId;
+      try { byId = (await client.request('GET /repositories/{repository_id}', { repository_id: expectedId })).data; }
+      catch (error) { if (error.status !== 404) throw error; }
+      if (byId) throw new Error(`${request.name}: the registered repository was renamed or transferred`);
+      if (desiredStatus !== 'deleted') throw new Error(`${request.name}: the registered repository is missing; automatic recreation is prohibited`);
+    }
+    if (desiredStatus !== 'active' && !expectedId) throw new Error(`${request.name}: repository_id is required`);
+    if (desiredStatus === 'archived' && !repository) throw new Error(`${request.name}: an existing registered repository is required for archiving`);
+    if (desiredStatus === 'active' && repository?.archived && !request.repository_id) throw new Error(`${request.name}: restoring an archived repository requires its repository_id`);
+    if (repository) ids.push(repository.id);
+    if (desiredStatus === 'deleted') continue;
     const access = effectiveAccess(request, policy);
     Object.keys(access.users).forEach((user) => users.add(user));
     Object.keys(access.teams).forEach((team) => teams.add(team));
-    const repository = await findRepository(client, policy.organization, request.name);
-    if (tracked && repository && !tracked.has(request.name)) throw new Error(`${request.name}: name already exists outside Terraform state; administrator import required`);
-    if (repository?.archived) throw new Error(`${request.name}: archived repositories require administrator maintenance`);
     if (request.template) {
       const template = await findRepository(client, request.template.owner, request.template.repository);
       if (!template?.is_template) throw new Error(`${request.name}: initialization template is unavailable`);
@@ -59,17 +85,30 @@ export async function inspectCatalog(client, catalog, policy, tracked = null) {
   }
   for (const user of users) await client.rest.users.getByUsername({ username: user });
   for (const team_slug of teams) await client.rest.teams.getByName({ org: policy.organization, team_slug });
+  return ids;
 }
 
 export async function verifyCatalog(client, catalog, policy) {
   const result = [];
   for (const request of Object.values(catalog)) {
     const repository = await findRepository(client, policy.organization, request.name);
-    if (!repository || repository.visibility !== request.visibility || repository.description !== request.description || repository.default_branch !== 'main') {
+    const desiredStatus = repositoryStatus(request);
+    if (desiredStatus === 'deleted') {
+      if (repository) throw new Error(`${request.name}: the repository still exists after its approved deletion`);
+      try {
+        await client.request('GET /repositories/{repository_id}', { repository_id: request.repository_id });
+        throw new Error(`${request.name}: the original repository ID still exists`);
+      } catch (error) { if (error.status !== 404) throw error; }
+      result.push({ name: request.name, url: `https://github.com/${policy.organization}/${request.name}`, id: request.repository_id, status: 'deleted', pending_invitations: [] });
+      continue;
+    }
+    const existing = repositoryMode(request) === 'existing';
+    if (!repository || (!existing && (repository.visibility !== request.visibility || repository.description !== request.description || repository.default_branch !== defaultBranch(request, policy)))) {
       throw new Error(`${request.name}: repository attributes do not match the approved request`);
     }
+    if (repository.archived !== (desiredStatus === 'archived') || (request.repository_id && repository.id !== request.repository_id)) throw new Error(`${request.name}: repository identity or lifecycle status differs from the approved request`);
     const expected = effectiveAccess(request, policy);
-    if (JSON.stringify([...(repository.topics ?? [])].sort()) !== JSON.stringify([...(request.topics ?? [])].sort())) throw new Error(`${request.name}: repository topics differ from the approved request`);
+    if (!existing && JSON.stringify([...(repository.topics ?? [])].sort()) !== JSON.stringify([...(request.topics ?? [])].sort())) throw new Error(`${request.name}: repository topics differ from the approved request`);
     const invitations = await client.paginate(client.rest.repos.listInvitations, { owner: policy.organization, repo: request.name });
     if (invitations.some((item) => !expected.users[item.invitee?.login.toLowerCase()])) throw new Error(`${request.name}: unexpected pending collaborator invitation`);
     const pending = [];
@@ -97,6 +136,10 @@ export async function verifyCatalog(client, catalog, policy) {
       const role = { read: 'pull', write: 'push' }[user.role_name] ?? user.role_name;
       if (role !== expected.users[user.login.toLowerCase()]) throw new Error(`${request.name}: direct permission differs for ${user.login}`);
     }
+    if (existing) {
+      result.push({ name: request.name, url: repository.html_url, id: repository.id, status: desiredStatus, pending_invitations: pending });
+      continue;
+    }
     const rulesets = await client.paginate(client.rest.repos.getRepoRulesets, { owner: policy.organization, repo: request.name });
     const ruleset = rulesets.find((item) => item.name === 'review-default-branch' && item.enforcement === 'active');
     if (!ruleset) throw new Error(`${request.name}: default branch ruleset is missing`);
@@ -111,7 +154,7 @@ export async function verifyCatalog(client, catalog, policy) {
         throw new Error(`${request.name}: pull request review rules differ from the management policy`);
       }
     }
-    result.push({ name: request.name, url: repository.html_url, id: repository.id, pending_invitations: pending });
+    result.push({ name: request.name, url: repository.html_url, id: repository.id, status: desiredStatus, pending_invitations: pending });
   }
   return result;
 }

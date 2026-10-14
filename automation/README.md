@@ -8,6 +8,7 @@
 | `terraform/` | 仓库、默认分支、权限和分支规则 |
 | `schema/` | 申请字段格式 |
 | `policy.yml` | 组织、管理员、团队、模板和仓库政策 |
+| `templates/readme/` | 初始化 README 的 project、library 和 minimal 模板 |
 | `backend/` | Git 状态后端的编译配置和许可证 |
 | `test/` | 配置、权限和工作流的程序测试 |
 | `docs/` | 申请、部署、运行、验证、实施设计、调研证据和文档规范 |

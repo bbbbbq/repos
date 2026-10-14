@@ -4,7 +4,7 @@
 
 **用一句话申请仓库，通过一次 PR 完成审核。**
 
-GitHub Actions 创建仓库、配置权限，并核验每次执行的结果。
+GitHub Actions 创建和 Fork 仓库、配置权限、归档和删除仓库，并核验每次执行的结果。
 
 [开始申请](#用日常语言申请) · [配置字段](automation/docs/requesting.md) · [管理员配置](automation/docs/setup.md) · [运行与恢复](automation/docs/operations.md)
 
@@ -30,7 +30,7 @@ npm --prefix automation ci
 
 `repo-request` 使用当前编码助手理解自然语言。CI 根据审核后的 YAML 执行仓库管理。
 
-## 从申请到创建
+## 从申请到执行
 
 ```mermaid
 flowchart LR
@@ -38,11 +38,24 @@ flowchart LR
     B --> C[提交 PR]
     C --> D[Actions 校验和预览]
     D --> E[管理员审核合并]
-    E --> F[Actions 创建和授权]
+    E --> F[Actions 执行已批准操作]
     F --> G[核验并报告结果]
 ```
 
 每个仓库对应一份配置。权限调整也通过修改同一个文件并提交 PR 完成。
+
+## 管理已有仓库与生命周期
+
+| 需求 | 配置与操作 |
+| --- | --- |
+| 创建仓库 | 在 `repositories/` 提交新 YAML；可选择 README 模板和许可证 |
+| Fork 仓库 | 指定真实来源和 `mode: fork`，建立 Fork 关联并配置权限 |
+| 为已有仓库申请权限 | 用 `mode: existing` 登记真实仓库 ID，保留现有内容与设置 |
+| 归档仓库 | 移动 YAML 到 `repositories/archive/`，设置 `status: archived` |
+| 删除仓库 | 在归档目录设置 `status: deleted`，保留 YAML 与执行记录 |
+| 恢复归档仓库 | 将 YAML 移回 `repositories/`，设置 `status: active` |
+
+可以对 `$repo-request` 说“给 GW100 申请 bbbbbq 的管理权限”“Fork octocat/Hello-World 到 gevico”或“删除 demo”。助手查询真实 ID、保留已有字段，并生成申请。生命周期申请单独提交 PR，管理员审核预览中的准确目标后合并。[查看归档与删除规则](automation/docs/lifecycle.md)
 
 ## 一份清晰的申请
 
@@ -67,6 +80,7 @@ access:
 - **Check**：校验申请文件、运行程序测试，并检查 Terraform 配置。
 - **Request**：读取 PR 中的 YAML 数据，检查真实 GitHub 身份、名称和模板，展示变更预览。
 - **Apply**：合并后使用 Terraform 创建仓库、设置默认分支与权限、配置分支规则，并通过 GitHub API 核验。
+- **Credentials**：每天检查跨组织 Fork 的用户令牌，失效时创建 Issue 并提及 `@zevorn`。
 
 工作流运行在 GitHub 托管 runner。GitHub App 提供组织访问权限，任务内生成临时令牌。Terraform 状态使用 SOPS/age 加密，保存在私有仓库 `gevico/repos-state`。PR 预览记录加密保存到 Actions artifacts；执行任务核验记录来源后，将记录保存到私有状态仓库。全部运行和存储使用 GitHub 资源。
 
@@ -77,7 +91,8 @@ access:
 | 位置 | 内容 |
 | --- | --- |
 | [`automation/`](automation/) | 管理程序、Terraform、Schema、政策、测试与全部文档 |
-| `repositories/` | 实际仓库申请的 `<name>.yaml` 文件 |
+| `repositories/` | 可写仓库的 `<name>.yaml` 声明 |
+| `repositories/archive/` | 归档与删除仓库的 YAML 声明 |
 | `README.md` | 项目入口与申请流程 |
 
 GitHub 从 `.github/` 发现工作流和审核配置，编码助手从 `.agents/skills/` 发现仓库 skill。这两个目录保留在项目根目录。
@@ -103,9 +118,20 @@ npm --prefix automation run check
 
 在线校验使用 `GH_TOKEN`、`GITHUB_TOKEN` 或本地 `gh` 登录。它查询用户、团队与模板。仓库创建由审核合并后的 Actions 执行。
 
+生成已有仓库权限申请，或选择初始化内容：
+
+```bash
+npm --prefix automation run existing -- --name GW100 --user bbbbbq:admin
+npm --prefix automation run lifecycle -- --name demo --status deleted
+npm --prefix automation run request -- \
+  --name project-study --description "项目研究与实验" \
+  --maintainer zevorn --readme-template project --license mit
+```
+
 ## 文档与贡献
 
 - [申请仓库和修改权限](automation/docs/requesting.md)
+- [归档、删除和恢复仓库](automation/docs/lifecycle.md)
 - [配置 GitHub App、状态仓库和加密密钥](automation/docs/setup.md)
 - [执行结果、冲突、导入与恢复](automation/docs/operations.md)
 - [已执行的验证](automation/docs/verification.md)

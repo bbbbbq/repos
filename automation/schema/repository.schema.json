@@ -5,8 +5,24 @@
   "additionalProperties": false,
   "required": ["name", "description", "visibility", "access"],
   "properties": {
-    "name": { "type": "string", "minLength": 1, "maxLength": 100, "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
-    "description": { "type": "string", "minLength": 1, "maxLength": 350 },
+    "name": { "type": "string", "minLength": 1, "maxLength": 100, "pattern": "^[A-Za-z0-9_.-]+$", "not": { "enum": [".", ".."] } },
+    "mode": { "enum": ["create", "existing", "fork"] },
+    "status": { "enum": ["active", "archived", "deleted"] },
+    "repository_id": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+    "description": { "type": "string", "maxLength": 350 },
+    "default_branch": { "type": "string", "minLength": 1, "maxLength": 255 },
+    "readme_template": { "enum": ["project", "library", "minimal"] },
+    "license": { "enum": ["mit", "apache-2.0", "bsd-2-clause", "bsd-3-clause", "gpl-2.0", "gpl-3.0", "lgpl-3.0", "agpl-3.0", "mpl-2.0", "unlicense", "cc0-1.0"] },
+    "fork": {
+      "type": "object", "additionalProperties": false,
+      "required": ["owner", "repository", "source_repository_id"],
+      "properties": {
+        "owner": { "type": "string", "pattern": "^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$" },
+        "repository": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+$", "not": { "enum": [".", ".."] } },
+        "source_repository_id": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "default_branch_only": { "type": "boolean" }
+      }
+    },
     "visibility": { "enum": ["public", "private"] },
     "topics": { "type": "array", "maxItems": 20, "uniqueItems": true, "items": { "type": "string", "maxLength": 50, "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" } },
     "access": {
@@ -36,5 +52,9 @@
       }
     }
   },
+  "allOf": [{
+    "if": { "properties": { "status": { "enum": ["archived", "deleted"] } }, "required": ["status"] },
+    "then": { "properties": { "repository_id": { "$ref": "#/properties/repository_id" } }, "required": ["repository_id"] }
+  }],
   "definitions": { "role": { "enum": ["pull", "triage", "push", "maintain", "admin"] } }
 }

@@ -1,16 +1,48 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { root, engine, work, loadCatalog, loadPolicy, checkTransition, changedNames, digest, writeJson, isRepositoryRequest } from './config.mjs';
+import { root, engine, work, loadCatalog, loadPolicy, checkTransition, changedNames, digest, writeJson, isRepositoryRequest, repositoryMode, repositoryStatus, renderReadme, defaultBranch } from './config.mjs';
 import { github, remoteCatalog, inspectCatalog, verifyCatalog, comment, status } from './github.mjs';
 import { StateStore } from './state.mjs';
 import { prepareTerraform, terraformPlan, terraformApply } from './runtime.mjs';
 import { authorizePlan, describeIntents } from './plan-policy.mjs';
 import { saveReview, loadReview } from './reviews.mjs';
+import { AppSession } from './app-session.mjs';
+import { importTargets, initializeForks, verifyForkSource } from './onboarding.mjs';
+import { ForkCredentialError, reportForkCredentialIssue } from './credentials.mjs';
 
 const command = process.argv[2];
 let pullRequest;
 let control;
 let store;
+let session;
+
+async function readSession() {
+  session = await AppSession.open();
+  const reader = await session.token('read');
+  process.env.GH_TOKEN = reader.token;
+  process.env.GITHUB_TOKEN = reader.token;
+  return reader.client;
+}
+
+function requireLifecycleMigration(state, lifecycle) {
+  if (lifecycle && Object.values(state.repositories).some((repository) => repository.archive_on_destroy !== false)) throw new Error('Lifecycle requests require the completed archive_on_destroy=false state migration');
+}
+
+async function initialFiles(client, catalog, review) {
+  for (const name of review?.changed ?? []) {
+    const request = catalog[name];
+    if (!review.intents.some((intent) => intent.name === name && intent.type === 'github_repository' && intent.actions[0] === 'create')) continue;
+    if (request.readme_template) {
+      const { data } = await client.rest.repos.getContent({ owner: 'gevico', repo: name, path: 'README.md', ref: defaultBranch(request, await loadPolicy()) });
+      const { data: blob } = await client.rest.git.getBlob({ owner: 'gevico', repo: name, file_sha: data.sha });
+      if (Buffer.from(blob.content, 'base64').toString('utf8') !== renderReadme(request)) throw new Error(`${name}: initialized README does not match the approved template`);
+    }
+    if (request.license) {
+      const { data } = await client.rest.licenses.getForRepo({ owner: 'gevico', repo: name });
+      if (data.license?.key !== request.license) throw new Error(`${name}: initialized license differs from the approved selection`);
+    }
+  }
+}
 
 async function input() {
   const policy = await loadPolicy();
@@ -29,34 +61,42 @@ async function request() {
   const head = pullRequest.head.sha;
   await status(control, owner, repo, head, 'pending', 'Validating repository request', 'request/check');
   const files = await control.paginate(control.rest.pulls.listFiles, { owner, repo, pull_number: number });
-  const requests = files.filter((file) => isRepositoryRequest(file.filename));
+  const requests = files.filter((file) => isRepositoryRequest(file.filename) || isRepositoryRequest(file.previous_filename ?? ''));
   if (!requests.length) {
     await status(control, owner, repo, head, 'success', 'Maintenance PR; repository requests unchanged', 'request/check');
     return;
   }
   if (files.some((file) => !isRepositoryRequest(file.filename) && !(file.filename === 'repositories/.gitkeep' && file.status === 'removed'))) throw new Error('Repository requests must be submitted separately from management code, policy or documentation changes');
-  if (requests.some((file) => ['removed', 'renamed'].includes(file.status))) throw new Error('Removing or renaming repository requests is prohibited');
   if (process.env.GITHUB_SHA !== pullRequest.base.sha) throw new Error('Trusted workflow source differs from the current PR base; rerun Request on main');
   if (process.env.AUTOMATION_ENABLED !== 'true') throw new Error('Organization automation is not configured; administrator must complete automation/docs/setup.md');
-  const reader = github();
+  const reader = await readSession();
   const before = await remoteCatalog(control, owner, repo, pullRequest.base.sha, path.join(work, 'base'));
   const after = await remoteCatalog(control, owner, repo, head, path.join(work, 'head'));
-  checkTransition(before.catalog, after.catalog);
+  const { lifecycle } = checkTransition(before.catalog, after.catalog);
   const changed = changedNames(before.catalog, after.catalog);
   store = await StateStore.open();
   const applied = await store.get('applied.json', true);
   if (applied?.data.sha !== pullRequest.base.sha) throw new Error('The base commit has not finished applying; rerun preview after Apply succeeds');
   const stateBefore = await store.terraformState();
-  await inspectCatalog(reader, after.catalog, after.policy, stateBefore.names);
-  const directory = await prepareTerraform(after.catalog, after.policy, store);
+  requireLifecycleMigration(stateBefore, lifecycle);
+  const ids = await inspectCatalog(reader, after.catalog, after.policy, stateBefore, applied.data.repositories);
+  if (lifecycle && ids.length + 1 > 500) throw new Error('Lifecycle execution exceeds the GitHub installation token repository limit');
+  for (const name of changed) if (repositoryMode(after.catalog[name]) === 'fork') {
+    await verifyForkSource(reader, after.catalog[name]);
+    if (!before.catalog[name] && after.catalog[name].fork.owner.toLowerCase() !== 'gevico' && process.env.FORK_ENABLED !== 'true') throw new Error('External Fork requests require configured production FORK_USER_TOKEN and FORK_ENABLED=true');
+  }
+  const imports = await importTargets(reader, after.catalog, stateBefore);
+  const directory = await prepareTerraform(after.catalog, after.policy, store, imports);
   const plan = await terraformPlan(directory, { readOnly: true });
-  const intents = authorizePlan(plan, after.catalog, after.policy, changed);
+  const intents = authorizePlan(plan, after.catalog, after.policy, changed, null, { lifecycle });
   const stateAfter = await store.terraformState();
   if (stateBefore.version !== stateAfter.version) throw new Error('Terraform state changed during preview; rerun request validation');
   const latest = (await control.rest.pulls.get({ owner, repo, pull_number: number })).data;
   if (latest.head.sha !== head || latest.base.sha !== pullRequest.base.sha) throw new Error('Pull request changed during preview; rerun validation');
   const lock = await fs.readFile(path.join(engine, 'terraform/.terraform.lock.hcl'), 'utf8');
-  const review = { number, head, base: pullRequest.base.sha, config_digest: digest(after.catalog), policy_digest: digest(after.policy), lock_digest: digest(lock), state_version: stateBefore.version, changed, intents };
+  const review = { number, head, base: pullRequest.base.sha, config_digest: digest(after.catalog), policy_digest: digest(after.policy), lock_digest: digest(lock), state_version: stateBefore.version, changed, lifecycle, intents,
+    repository_ids: Object.fromEntries(changed.filter((name) => after.catalog[name].repository_id).map((name) => [name, after.catalog[name].repository_id])),
+    forks: Object.fromEntries(changed.filter((name) => !before.catalog[name] && repositoryMode(after.catalog[name]) === 'fork').map((name) => [name, after.catalog[name].fork])) };
   await saveReview(review);
   await comment(control, owner, repo, number, `### Repository request\n\nCommit: \`${head}\`\n\n${describeIntents(intents)}\n\nMerge this PR after the configuration and these changes have been approved.`);
   await status(control, owner, repo, head, 'success', 'Repository configuration and execution preview validated', 'request/check');
@@ -66,7 +106,7 @@ async function apply() {
   const { policy, owner, repo } = await input();
   if (process.env.GITHUB_REF !== 'refs/heads/main') throw new Error('Apply is restricted to main');
   if (process.env.AUTOMATION_ENABLED !== 'true') throw new Error('Organization automation is not configured; administrator must complete automation/docs/setup.md');
-  const client = github();
+  const reader = await readSession();
   control = github(process.env.CONTROL_TOKEN);
   const sha = process.env.GITHUB_SHA;
   const commit = (await control.rest.repos.getCommit({ owner, repo, ref: sha })).data;
@@ -81,31 +121,50 @@ async function apply() {
   if (pullRequest) pullRequest = (await control.rest.pulls.get({ owner, repo, pull_number: pullRequest.number })).data;
   if (!pullRequest && Object.keys(catalog).length) throw new Error('A merged pull request is required to change repositories');
   let review;
+  let transition = { lifecycle: false };
   const files = pullRequest ? await control.paginate(control.rest.pulls.listFiles, { owner, repo, pull_number: pullRequest.number }) : [];
   if (pullRequest && files.some((file) => isRepositoryRequest(file.filename) || isRepositoryRequest(file.previous_filename ?? ''))) {
     const base = commit.parents[0]?.sha;
     if (!base) throw new Error('Merged commit must have an approved base commit');
     const before = await remoteCatalog(control, owner, repo, base, path.join(work, 'base'));
-    checkTransition(before.catalog, catalog);
+    transition = checkTransition(before.catalog, catalog);
     const changed = changedNames(before.catalog, catalog);
     if (changed.length) {
       const saved = await store.get(`reviews/${pullRequest.number}/${pullRequest.head.sha}.json`, true);
       review = saved?.data ?? await loadReview(control, owner, repo, pullRequest.number, pullRequest.head.sha, base);
       const lock = await fs.readFile(path.join(engine, 'terraform/.terraform.lock.hcl'), 'utf8');
-      if (review.number !== pullRequest.number || review.head !== pullRequest.head.sha || review.base !== base || review.source_sha !== base || review.config_digest !== digest(catalog) || review.policy_digest !== digest(policy) || review.lock_digest !== digest(lock)) throw new Error('Merged configuration differs from the validated PR');
+      if (review.number !== pullRequest.number || review.head !== pullRequest.head.sha || review.base !== base || review.source_sha !== base || review.config_digest !== digest(catalog) || review.policy_digest !== digest(policy) || review.lock_digest !== digest(lock) || Boolean(review.lifecycle) !== transition.lifecycle) throw new Error('Merged configuration differs from the validated PR');
       if (applied?.data.sha !== review.base && applied?.data.sha !== sha) throw new Error('The preceding approved commit has not finished applying');
-      if (!saved) await store.put(`reviews/${pullRequest.number}/${pullRequest.head.sha}.json`, review);
     }
   }
-  await inspectCatalog(client, catalog, policy, state.names);
-  const directory = await prepareTerraform(catalog, policy, store);
+  requireLifecycleMigration(state, transition.lifecycle);
+  const records = [...(applied?.data.repositories ?? [])];
+  for (const name of Object.keys(review?.forks ?? {})) {
+    const initialization = await store.get(`forks/${pullRequest.number}/${pullRequest.head.sha}/${name}.json`, true);
+    if (initialization?.data.id && !records.some((item) => item.name === name)) records.push({ name, id: initialization.data.id, origin: 'fork-init' });
+  }
+  const ids = await inspectCatalog(reader, catalog, policy, state, records);
+  const stateRepository = (await reader.rest.repos.get({ owner, repo: 'repos-state' })).data;
+  await store.close(); store = null;
+  const writer = await session.token('write', transition.lifecycle ? [...ids, stateRepository.id] : null);
+  process.env.GH_TOKEN = writer.token;
+  process.env.GITHUB_TOKEN = writer.token;
+  store = await StateStore.open();
+  if ((await store.terraformState()).version !== state.version) throw new Error('Terraform state changed while preparing execution; rerun Apply');
+  if (review) await store.put(`reviews/${pullRequest.number}/${pullRequest.head.sha}.json`, review);
+  const forkIds = review ? await initializeForks(reader, writer.client, catalog, review.changed, store, `${pullRequest.number}/${pullRequest.head.sha}`) : {};
+  const currentState = await store.terraformState();
+  const imports = await importTargets(reader, catalog, currentState);
+  const directory = await prepareTerraform(catalog, policy, store, imports);
   const plan = await terraformPlan(directory);
-  const intents = authorizePlan(plan, catalog, policy, review?.changed ?? [], review?.intents ?? []);
+  authorizePlan(plan, catalog, policy, review?.changed ?? [], review?.intents ?? [], { allowMigration: !review, lifecycle: transition.lifecycle, forkIds });
+  await inspectCatalog(reader, catalog, policy, currentState, [...records, ...Object.entries(forkIds).filter(([name]) => !records.some((item) => item.name === name)).map(([name, id]) => ({ name, id, origin: 'fork-init' }))]);
   await terraformApply(directory);
-  const result = await verifyCatalog(client, catalog, policy);
+  const result = await verifyCatalog(reader, catalog, policy);
+  if (applied?.data.sha !== sha) await initialFiles(reader, catalog, review);
   await store.put('applied.json', { sha, repositories: result, applied_at: new Date().toISOString(), run_id: process.env.GITHUB_RUN_ID });
   await writeJson(path.join(work, 'result.json'), result);
-  const report = result.length ? result.map((item) => `- [${item.name}](${item.url})${item.pending_invitations.length ? ` — pending invitations: ${item.pending_invitations.join(', ')}` : ''}`).join('\n') : 'The management repository is initialized. No target repositories are registered.';
+  const report = result.length ? result.map((item) => `- ${item.status === 'deleted' ? `\`${item.name}\`` : `[${item.name}](${item.url})`}: ${item.status}, repository ID ${item.id}${item.pending_invitations.length ? ` — pending invitations: ${item.pending_invitations.join(', ')}` : ''}`).join('\n') : 'The management repository is initialized. No target repositories are registered.';
   if (process.env.GITHUB_STEP_SUMMARY) await fs.appendFile(process.env.GITHUB_STEP_SUMMARY, `## Repository verification\n\n${report}\n`);
   if (pullRequest) await comment(control, owner, repo, pullRequest.number, `### Repository verification succeeded\n\nApplied commit: \`${sha}\`\n\n${report}`);
   const open = await control.paginate(control.rest.pulls.list, { owner, repo, state: 'open', base: 'main' });
@@ -127,6 +186,7 @@ try {
   else throw new Error(`Unknown CI command: ${command}`);
 } catch (error) {
   console.error(error.message);
+  if (error instanceof ForkCredentialError && control) await reportForkCredentialIssue(control, error);
   if (pullRequest && control) {
     const policy = await loadPolicy();
     if (command === 'request') await status(control, policy.organization, policy.management_repository, pullRequest.head.sha, 'failure', error.message, 'request/check').catch(() => {});
@@ -135,4 +195,5 @@ try {
   process.exitCode = 1;
 } finally {
   if (store) await store.close();
+  if (session) await session.close();
 }

@@ -34,6 +34,7 @@ jobs:
       STATE_GIT_EMAIL: ${{ vars.STATE_GIT_EMAIL }}
       TF_IN_AUTOMATION: 'true'
       TF_INPUT: '0'
+      FORK_ENABLED: ${{ vars.FORK_ENABLED }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -59,22 +60,12 @@ jobs:
         if: vars.AUTOMATION_ENABLED == 'true'
         env:
           TMPDIR: ${{ github.workspace }}/.work/tmp
-      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
-        if: vars.AUTOMATION_ENABLED == 'true'
-        id: app
-        with:
-          client-id: ${{ vars.READ_APP_CLIENT_ID }}
-          private-key: ${{ secrets.READ_APP_PRIVATE_KEY }}
-          owner: gevico
-          permission-administration: read
-          permission-contents: read
-          permission-members: read
       - uses: ./.github/actions/automation
         with:
           command: request
         env:
-          GH_TOKEN: ${{ steps.app.outputs.token }}
-          GITHUB_TOKEN: ${{ steps.app.outputs.token }}
+          APP_CLIENT_ID: ${{ vars.READ_APP_CLIENT_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.READ_APP_PRIVATE_KEY }}
           CONTROL_TOKEN: ${{ github.token }}
           STATE_AGE_KEY: ${{ secrets.STATE_AGE_KEY }}
           TMPDIR: ${{ github.workspace }}/.work/tmp

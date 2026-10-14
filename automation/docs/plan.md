@@ -2,7 +2,7 @@
 
 ## 目标
 
-在 `gevico` 组织建立 `repos` 管理仓库。申请人使用仓库中的 `repo-request` skill 描述需求，助手生成并校验 YAML，然后通过 PR 提交目标仓库配置。管理员审核并合并后，GitHub Actions 自动创建目标仓库、初始化默认分支、设置团队和个人权限，并核验执行结果。全部自动操作在 GitHub 托管的 Actions runner 中运行。
+在 `gevico` 组织通过 `repos` 处理创建、Fork、已有仓库权限申请、归档、删除和恢复。申请人使用 `repo-request` skill 描述需求，助手生成并校验 YAML。管理员审核并合并 PR 后，GitHub Actions 执行操作并核验结果。新仓库可选择 README 模板和许可证，全部自动操作在 GitHub 托管 runner 中运行。
 
 同一份配置用于后续权限修改和撤销。每次执行保留申请 PR、合并提交、变更预览和 GitHub API 核验结果之间的对应关系。
 
@@ -21,27 +21,31 @@
 - 目标仓库支持 `public` 和 `private`，默认值为 `public`。公开管理仓库中的名称、描述和权限申请对公众可见；私有目标仓库的代码访问由 GitHub 权限控制。
 - 审核负责人和目标仓库管理员使用组织所有者 `zevorn`，在 CODEOWNERS 和 `automation/policy.yml` 中配置。组织已有团队由 `allowed_teams` 指定，团队管理员授权由 `administrator_teams` 配置。
 - Terraform 状态由 `terraform-backend-git v0.1.12` 使用 SOPS/age 加密，保存到私有 `gevico/repos-state`。远程 Git 锁分支提供原子锁定，Git 提交保存版本。后端运行在 Actions runner 内，Terraform 通过本地 HTTP 访问。[Git 后端](https://github.com/plumber-cd/terraform-backend-git/tree/v0.1.12)、[HTTP 后端](https://developer.hashicorp.com/terraform/language/backend/http)
-- 部署参数包括 GitHub App Client ID、私钥、age 密钥、公钥及状态提交身份。官方认证 Action 自动取得安装令牌。全部运行和持久存储使用 GitHub 资源。
+- 部署参数包括 GitHub App Client ID、私钥、age 密钥、公钥及状态提交身份。官方 `@octokit/auth-app` 在任务内生成安装令牌；跨组织 Fork 使用 production 用户令牌。全部运行和持久存储使用 GitHub 资源。
 
 ## 配置格式与管理范围
 
-每个目标仓库对应 `repositories/<name>.yaml`。文件名称、`name` 和 Terraform 资源索引使用相同的稳定名称。组织名称在管理端固定为 `gevico`。
+每个可写仓库对应 `repositories/<name>.yaml`，归档和删除声明对应 `repositories/archive/<name>.yaml`。文件名称、`name` 和 Terraform 索引使用相同的稳定名称，组织固定为 `gevico`。
 
 申请字段：
 
-- `name`：仓库名称，采用小写字母、数字和连字符；校验重复名称与保留名称。
+- `name`：新仓库名称使用小写字母、数字和连字符；已有仓库采用真实 GitHub 名称，校验重复名称与保留名称。
 - `description`：仓库用途，申请时填写。
 - `visibility`：`public` 或 `private`。
 - `topics`：可选的仓库主题。
 - `access.users`：GitHub 用户名到权限角色的映射。
 - `access.teams`：现有组织团队 slug 到权限角色的映射。
 - `template`：可选的初始化模板，来源必须属于管理员配置的模板清单。
+- `mode`：创建、已有仓库权限管理或 Fork。
+- `status` 与 `repository_id`：声明可写、归档或删除状态，为已有仓库和生命周期操作绑定数字 ID。
+- `fork` 与 `default_branch`：绑定来源 ID、Fork 范围和默认分支。
+- `readme_template` 与 `license`：新仓库初始化内容；许可证选择用于普通新建仓库。
 
 权限角色支持 `pull`、`triage`、`push`、`maintain`、`admin`。每个仓库必须指定维护负责人：个人或团队取得 `maintain` 或 `admin` 权限。管理端始终为政策中的管理员设置 `admin` 权限。
 
-管理员维护 `automation/policy.yml`，定义保留名称、团队清单、模板清单及默认仓库规则。YAML 解析拒绝重复键，Schema 拒绝未知字段及无效字段值，配置变更检查拒绝名称变更、文件重命名和配置条目删除。配置字段作为数据传递到库和 Terraform。
+管理员维护 `automation/policy.yml`，定义保留名称、团队清单、模板清单、保护用户与默认规则。YAML 拒绝重复键，Schema 拒绝未知字段及无效值。配置检查拒绝名称、模式、登记 ID 和初始化配置变化，以及单纯移除声明；目录移动由生命周期状态识别。配置字段作为数据传递到库和 Terraform。
 
-资源范围包括已登记目标仓库的属性、默认分支、直接团队授权、直接个人授权和分支保护。团队和组织成员由组织管理员维护。已有同名仓库需要经过管理员审核的导入操作，再进入本管理范围。
+新仓库和 Fork 管理仓库属性、默认分支、初始化 README、直接授权与保护规则。`mode: existing` 导入准确 ID 的仓库和授权资源，管理直接权限及生命周期，保留已有内容、默认分支、属性和保护规则。团队和组织成员由组织管理员维护。
 
 ## PR 与 CI 流程
 
@@ -90,12 +94,12 @@ flowchart TD
 1. 读取合并提交，确认关联 PR 和已通过的检查，重复执行配置及政策校验。
 2. 获取写入 GitHub App 的临时令牌，核验 Actions 审核 artifact 的工作流来源、提交、运行次数和内容，将加密审核记录保存到私有仓库，锁定 Terraform 状态。
 3. 刷新 GitHub 实际状态，生成执行计划，检查计划只涉及已批准配置的资源和字段。
-4. 创建仓库并初始化分支；将默认分支设置为 `main`。
+4. Provider 创建普通仓库。GitHub Fork API 创建 Fork，保存返回 ID 后由 Terraform import 登记。已有仓库在计划中导入。新仓库默认分支为 `main`，Fork 保留来源默认分支。
 5. 设置管理团队、申请团队和个人协作者的权限。
 6. 设置目标仓库的默认分支保护，要求通过 PR 合并、经过审核，并保护分支免受删除和强制推送。私有仓库的规则以组织已开通的 GitHub 套餐能力为部署条件。
 7. 通过 GitHub API 核验仓库属性、默认分支、直接权限和邀请状态，记录 Terraform 状态及执行结果。
 
-普通创建使用 `github_repository` 和 `auto_init`；模板创建使用该资源的 `template` 配置。默认分支使用 `github_branch_default`，等待分支设置完成后再添加保护规则。[仓库资源](https://github.com/integrations/terraform-provider-github/blob/main/docs/resources/repository.md)、[默认分支资源](https://github.com/integrations/terraform-provider-github/blob/main/docs/resources/branch_default.md)
+普通创建使用 `github_repository`、`auto_init` 和可选的 `license_template`；仓库模板使用 `template`。README 由 Mustache 渲染，并由 `github_repository_file` 在初始化时写入。默认分支与 README 完成后添加保护规则。[仓库资源](https://github.com/integrations/terraform-provider-github/blob/v6.13.0/docs/resources/repository.md)、[文件资源](https://github.com/integrations/terraform-provider-github/blob/v6.13.0/docs/resources/repository_file.md)
 
 团队和个人权限统一使用 `github_repository_collaborators` 管理直接授权清单，包含固定管理团队和申请配置。权限移除或角色调整会在后续 PR 中展示并执行。[权限资源](https://github.com/integrations/terraform-provider-github/blob/main/docs/resources/repository_collaborators.md)
 
@@ -107,13 +111,14 @@ flowchart TD
 
 ### 凭证
 
-- GitHub App 作为组织访问的认证身份，关闭 Webhook。Actions 使用 `actions/create-github-app-token` 和保存在 secrets 中的 App 私钥生成临时安装令牌；每个任务分别获取需要的令牌，明确设置 `owner: gevico`。[App 注册设置](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/registering-a-github-app)、[官方令牌 Action](https://github.com/actions/create-github-app-token)
+- GitHub App 关闭 Webhook。官方 `@octokit/auth-app` 使用环境私钥生成临时令牌，核实有效的 `gevico` 全仓库安装。生命周期写入按数字 ID 限定范围，查询和核验使用全安装范围只读令牌。[官方认证库](https://github.com/octokit/auth-app.js)
 - PR 预览使用只读 GitHub App，读取组织、团队和仓库资料。
 - 读取私钥放在 `preview` 环境的 secrets 中，该环境的可部署分支限定为 `main`。
 - 创建及权限设置使用独立的写入 GitHub App，授予需要的仓库 `Administration`、`Contents` 和组织 `Members` 权限，安装范围覆盖受管理的新仓库。
 - 写入私钥放在 `production` 环境的 secrets 中，该环境的可部署分支限定为 `main`。正常执行的批准来自 PR 审核和合并。
 - `GITHUB_TOKEN` 用于发布管理仓库的检查结果、执行报告和访问 Actions artifacts。age 私钥保存在 `preview` 和 `production` 环境 Secrets，公钥保存在仓库 variable。私钥的本地备份使用 `0600` 权限并排除版本管理。
 - 依赖和 Actions 固定版本或提交 SHA；带凭证的任务执行受信任的管理程序。
+- 跨组织 Fork 使用 production 的 `FORK_USER_TOKEN`。每日 Credentials 检查和 Fork 凭证错误创建带 `@zevorn` 的 Issue，复用未关闭提醒，恢复后关闭提醒。
 
 GitHub App 权限根据所选 Provider 的实际读写行为逐项验证，PR 预览保持只读；API 字段读取与计划生成使用一致的已管理字段范围。[GitHub App 认证](https://github.com/integrations/terraform-provider-github/blob/main/docs/index.md)
 
@@ -132,21 +137,23 @@ PR 的必需检查确认其 base SHA 已成功应用。上一条合并的配置�
 - 创建完成后权限设置失败：保存已完成资源的状态，报告失败步骤；重新执行同一批准配置，完成剩余步骤。重新生成的计划必须仍属于已批准的声明效果。
 - GitHub 返回临时错误或限流：按 API 返回的等待信息重试；达到工作流时限后报告失败并保留可重新执行的状态。
 - 发现状态与实际仓库关系缺失：通过管理员维护流程核验并导入资源，保持仓库身份可追溯。
-- 配置条目删除与资源销毁：配置校验拒绝删除，仓库资源设置 `prevent_destroy`，执行计划检查拒绝仓库删除和替换操作。
+- 生命周期：归档使用 `archived` 属性并保留管理关系；删除保留 YAML，以数字 ID 授权目标及其关联资源的纯删除。部署先将内部 `archive_on_destroy` 策略准确迁移为 `false`；生命周期申请核验迁移完成。替换和未审核删除被拒绝。
 - 状态文件恢复：根据私有仓库的 Git 版本选择经核验的加密状态，使用对应 age 密钥解密，重新读取 GitHub 实际状态后生成计划。
 
 ## 验收条件
 
-- **AC-1 申请配置可以校验**：合法的真实申请通过检查；未知字段、重复名称、保留名称、无效角色、缺少维护负责人以及文件重命名被拒绝。
+- **AC-1 申请配置可以校验**：合法的真实申请通过检查；未知字段、重复名称、保留名称、无效角色、缺少维护负责人和不符合状态的目录被拒绝。
 - **AC-2 外部 PR 可以审核**：通过 fork 提交真实申请，PR 展示所申请资源的变更预览并关联提交；申请同时包含管理程序或工作流修改时，申请检查要求转入管理员维护流程。
 - **AC-3 审核控制实际创建**：审核并合并真实创建申请后，仓库在 `gevico` 中建立且属性、默认分支和分支规则正确；未合并申请保持待审核状态。
 - **AC-4 权限可以设置和撤销**：使用真实团队、组织成员及允许的外部协作者验证授予、角色修改和撤销；核验直接权限、继承权限和邀请状态，未知身份被拒绝。
 - **AC-5 重复执行可以恢复**：重新执行同一已成功提交得到无变更结果；权限设置因真实授权配置不足失败后，修复凭证配置并重新执行，完成剩余授权且保持同一仓库身份。
-- **AC-6 同名和删除可以阻止**：未登记的真实同名仓库触发冲突检查；删除配置或计划出现仓库替换时被拒绝。管理员导入既有仓库后，可正常生成权限变更计划。
+- **AC-6 身份和删除授权明确**：未登记同名仓库触发冲突；同名替代、资源替换和单纯移除 YAML 被拒绝。已有仓库通过审核导入后管理权限，生命周期由独立 PR 授权。
 - **AC-7 并发与状态能够保持一致**：提交有真实配置变更的多个 PR，核验前一项执行状态、后一项检查状态及 Git 后端锁定行为，最终资源与已合并配置一致。
 - **AC-8 报告可以核实**：成功报告中的仓库链接、属性、直接权限和邀请状态与 GitHub API 一致；失败报告列出未完成操作及对应工作流记录，成功结果只在核验通过后发布。
 - **AC-9 操作由 GitHub Actions 完成**：校验、创建、授权、恢复和核验记录均对应 GitHub 托管 runner 的工作流执行；GitHub App 关闭 Webhook，通过任务中的安装令牌完成认证。GitHub 私有仓库保存加密状态与执行记录，Actions artifacts 保存加密预览，任务执行由 Actions 承担。
 - **AC-10 自然语言申请和文档可以使用**：克隆仓库后，助手可以发现 `.agents/skills/repo-request/SKILL.md`，根据自然语言生成合法 YAML 并完成校验。README 提供申请入口、配置示例、流程图和操作导航，文档规范约束字段、命令、来源与排版。必要身份缺失时补充信息，授权角色以真实政策为准。
+- **AC-11 初始化与 Fork 可核实**：README 和许可证与申请一致，Fork 保留来源网络关系，返回 ID 保存到加密记录。初始化后的 README 由维护者编辑。
+- **AC-12 凭证提醒可核实**：用户令牌身份或组织权限检查失败时创建带 `@zevorn` 的 Issue，重复检查复用提醒，恢复后关闭提醒。
 
 验证使用真实 GitHub 仓库、团队、账户、邀请及 Terraform 状态。实现完成后运行必要测试和完整流程，依据实际结果修正问题。将具有后续复用价值的配置校验、权限管理和执行恢复测试纳入版本管理；一次性账户及部署检查作为执行记录保存。
 
@@ -167,7 +174,7 @@ PR 的必需检查确认其 base SHA 已成功应用。上一条合并的配置�
 - `automation/docs/documentation-guidelines.md`：面向项目文档的内容、命令、来源和排版规范。
 - `README.md`：申请入口、配置字段、审核规则及执行结果查询方式。
 
-本任务的完整交付范围由上述流程及 AC-1 至 AC-10 共同确定。实现范围限定在 `gevico/repos` 的管理程序、仓库 skill、文档和经批准登记的 GitHub 仓库资源。
+交付范围包括上述流程、仓库 skill、文档和经批准登记的 GitHub 仓库资源。
 
 ## 依赖与实施顺序
 

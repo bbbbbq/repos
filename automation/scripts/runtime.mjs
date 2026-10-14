@@ -14,13 +14,14 @@ export async function run(command, args, options = {}) {
   }
 }
 
-export async function prepareTerraform(catalog, policy, store) {
+export async function prepareTerraform(catalog, policy, store, imports = {}) {
   const directory = path.join(work, 'terraform');
   await fs.mkdir(directory, { recursive: true });
-  for (const filename of ['versions.tf', 'variables.tf', 'main.tf', 'outputs.tf', '.terraform.lock.hcl']) {
+  for (const filename of ['versions.tf', 'variables.tf', 'main.tf', 'outputs.tf', 'imports.tf', '.terraform.lock.hcl']) {
     await fs.copyFile(path.join(engine, 'terraform', filename), path.join(directory, filename));
   }
-  await writeJson(path.join(directory, 'requests.auto.tfvars.json'), terraformValues(catalog, policy));
+  await writeJson(path.join(directory, 'requests.auto.tfvars.json'), { ...terraformValues(catalog, policy), imports,
+    commit_name: (await run('git', ['config', 'user.name'])).trim(), commit_email: (await run('git', ['config', 'user.email'])).trim() });
   await run('terraform', ['init', '-reconfigure', '-input=false', '-lockfile=readonly'], { cwd: directory, env: store.env });
   return { directory, env: store.env };
 }
