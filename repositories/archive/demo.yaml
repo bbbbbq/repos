@@ -1,4 +1,6 @@
 name: demo
+status: deleted
+repository_id: 1418263004
 description: 仓库创建流程测试
 visibility: public
 topics: []
