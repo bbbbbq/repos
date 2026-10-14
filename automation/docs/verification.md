@@ -18,7 +18,7 @@
 
 ## 真实 GitHub 资源
 
-本地集成验证使用两个已安装的 GitHub App、Terraform 1.12.2、GitHub Provider 6.13.0，以及私有 [gevico/repos-state](https://github.com/gevico/repos-state)。验证目标为 [gevico/repos-integration-20261014](https://github.com/gevico/repos-integration-20261014)，仓库 ID 为 `1417660329`。
+本地集成验证使用两个已安装的 GitHub App、Terraform 1.12.2、GitHub Provider 6.13.0，以及私有 [gevico/repos-state](https://github.com/gevico/repos-state)。基础验证使用仓库 `gevico/repos-integration-20261014`，仓库 ID 为 `1417660329`。该测试仓库已删除，按名称和 ID 查询均返回 HTTP 404，其独立状态中的资源数量为零。
 
 已核验的结果：
 
@@ -32,6 +32,25 @@
 - 状态提交使用实际 Git 配置中的姓名和邮箱，包含 `Signed-off-by`。
 
 验证资源使用独立状态路径 `integration/20261014/terraform.tfstate`。
+
+## 生命周期、初始化和 Fork
+
+真实验证使用以下两个仓库，全部操作在独立状态 `integration/lifecycle-20261014/terraform.tfstate` 中执行：
+
+| 仓库 | 数字 ID | 核验结果 |
+| --- | --- | --- |
+| `repos-lifecycle-verification-20261014` | `1418297758` | 创建、project README、MIT 许可证、真实团队授权、归档、恢复、归档后删除 |
+| `repos-fork-verification-20261014` | `1418300170` | 从 `octocat/Hello-World` 创建真实 Fork、登记来源网络、导入 Terraform、保留默认分支、设置权限与保护规则、直接删除 |
+
+每个阶段均使用只读 App 生成真实 Terraform 预览，执行前重新生成计划并核验审核意图。归档、恢复和删除使用按目标与私有状态仓库数字 ID 限定的写入令牌。已经完成的阶段生成无变更计划；错误目标 ID 和未授权名称被拒绝。归档后，直接团队授权及保护规则保持有效。
+
+两个仓库已清理，按名称和原始 ID 查询均返回 HTTP 404，独立状态中的资源数量为零。真实阶段与核验时间保存到加密记录 `records/integration/lifecycle-20261014-result.json.age`，Fork 返回 ID 另有加密初始化记录。
+
+已有 `GW100` 的导入与权限声明通过真实只读 Terraform 预览：仓库 ID 为 `1380073834`，默认分支 `master` 保留，`bbbbbq` 和 `zevorn` 的管理权限符合政策。预览保留仓库属性和现有保护规则。用户令牌核验确认 `zevorn` 为有效所有者，真实撤销的测试令牌返回 HTTP 401 并被识别为凭证错误。
+
+## 组织成员权限
+
+组织普通成员创建公开、私有和内部仓库的权限均关闭，唯一所有者为 `zevorn`。`bbbbbq` 的成员身份为 `member`，在 `pigpig-runrun-docx`、`GW100`、`pigpig-runrun` 和 `sglang-omni-rocm` 的直接角色均为 `admin`。授权使用 GitHub Provider 核验，成员身份与四个角色通过 GitHub API 读取确认。
 
 ## 仓库申请的执行
 
