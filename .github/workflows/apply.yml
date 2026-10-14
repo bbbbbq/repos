@@ -9,6 +9,7 @@ permissions:
   contents: read
   pull-requests: write
   actions: write
+  issues: write
 
 concurrency:
   group: gevico-repository-apply
@@ -51,21 +52,13 @@ jobs:
       - run: npm --prefix automation run backend:build
         env:
           TMPDIR: ${{ github.workspace }}/.work/tmp
-      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
-        id: app
-        with:
-          client-id: ${{ vars.WRITE_APP_CLIENT_ID }}
-          private-key: ${{ secrets.WRITE_APP_PRIVATE_KEY }}
-          owner: gevico
-          permission-administration: write
-          permission-contents: write
-          permission-members: read
       - uses: ./.github/actions/automation
         with:
           command: apply
         env:
-          GH_TOKEN: ${{ steps.app.outputs.token }}
-          GITHUB_TOKEN: ${{ steps.app.outputs.token }}
+          APP_CLIENT_ID: ${{ vars.WRITE_APP_CLIENT_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.WRITE_APP_PRIVATE_KEY }}
+          FORK_USER_TOKEN: ${{ secrets.FORK_USER_TOKEN }}
           CONTROL_TOKEN: ${{ github.token }}
           STATE_AGE_KEY: ${{ secrets.STATE_AGE_KEY }}
           TMPDIR: ${{ github.workspace }}/.work/tmp

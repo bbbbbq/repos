@@ -56,7 +56,7 @@ test('catalog loading rejects symlinked requests and unrelated files', async () 
     await fs.writeFile(file, requestYaml(request));
     assert.deepEqual((await loadCatalog(directory)).catalog.coach, request);
     const output = path.join(directory, 'rendered.json');
-    await execute(process.execPath, [path.join(engine, 'scripts/repos.mjs'), 'render', '--directory', path.relative(root, directory), '--output', path.relative(root, output)], { cwd: engine });
+    await execute(process.execPath, [path.join(engine, 'scripts/repos.mjs'), 'render', '--directory', path.relative(root, directory), '--output', path.relative(root, output)], { cwd: engine, env: { ...process.env, GIT_CONFIG: '/dev/null' } });
     const rendered = JSON.parse(await fs.readFile(output, 'utf8'));
     assert.equal(rendered.repositories.coach.description, request.description);
     assert.deepEqual(rendered.repositories.coach.teams, request.access.teams);
@@ -86,7 +86,7 @@ test('a checkout without declarations has an empty catalog and retains its organ
     assert.equal(loaded.policy.organization, 'gevico');
     assert.deepEqual(loaded.policy.administrator_users, policy.administrator_users);
     const output = path.join(directory, 'rendered.json');
-    await execute(process.execPath, [path.join(engine, 'scripts/repos.mjs'), 'render', '--directory', path.relative(root, directory), '--output', path.relative(root, output)], { cwd: engine });
+    await execute(process.execPath, [path.join(engine, 'scripts/repos.mjs'), 'render', '--directory', path.relative(root, directory), '--output', path.relative(root, output)], { cwd: engine, env: { ...process.env, GIT_CONFIG: '/dev/null' } });
     const rendered = JSON.parse(await fs.readFile(output, 'utf8'));
     assert.equal(rendered.organization, 'gevico');
     assert.deepEqual(rendered.repositories, {});

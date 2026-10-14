@@ -28,7 +28,7 @@ node automation/scripts/repos.mjs render --output .work/import/requests.auto.tfv
 
 ## 状态与资源保护
 
-申请文件删除、文件重命名和初始化模板变更会被拒绝。Terraform 资源设置 `prevent_destroy`，计划检查拒绝删除及替换操作。
+名称、模式、初始化配置和登记 ID 保持稳定。单纯移除申请文件与资源替换会被拒绝；归档和删除通过保留完整 YAML 的生命周期 PR 执行。删除需要明确 `status: deleted`、准确数字 ID、已经保存的 `archive_on_destroy=false` 策略和对应审核记录。[生命周期规则](lifecycle.md)
 
 状态使用 SOPS/age 加密后保存到私有仓库的 `gevico/repos/terraform.tfstate`。Git 提交保存状态版本，远程 `locks/gevico/repos/terraform.tfstate` 分支提供原子锁定。Actions concurrency 同时限制组织写入任务。
 
@@ -43,3 +43,11 @@ PR 审核 artifact 保留 90 天。合并前记录过期时，重新运行 Reque
 ## 权限和邀请
 
 直接权限以已审核配置为准。GitHub 组织所有者、组织默认权限和团队继承可能提高有效权限。外部用户收到邀请时，等待用户接受；任务报告该邀请的真实状态。
+
+已有仓库可以使用 `mode: existing` 的声明和 PR 完成导入与权限申请。CLI 读取现有直接授权，保留用户没有要求修改的条目。已有仓库的默认分支、仓库属性和规则保持现状。
+
+## Fork 凭证提醒
+
+Credentials 每天检查 `FORK_USER_TOKEN`。身份或组织权限检查失败时，在管理仓库创建带 `@zevorn` 的 Issue；Apply 遇到相同凭证错误也使用该 Issue。更新 production secret 后运行 Credentials，核验成功会关闭对应提醒。GitHub 限流、网络错误和来源仓库政策错误按实际错误处理。
+
+Fork 初始化请求和返回的数字 ID 加密保存到 `records/forks/<PR>/<head>/<name>.json.age`。重复执行只接续同一审核申请和已记录的 ID。API 请求已经发出而返回 ID 尚未保存时，需要管理员核实该次创建结果并修复记录，避免接受同名的未登记仓库。

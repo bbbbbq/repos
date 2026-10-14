@@ -1,15 +1,39 @@
 import fs from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import Ajv from 'ajv';
 import { parseDocument, stringify } from 'yaml';
+import Mustache from 'mustache';
 
 export const engine = path.resolve(import.meta.dirname, '..');
 export const root = path.resolve(engine, '..');
 export const work = path.join(root, '.work');
 
 export function isRepositoryRequest(filename) {
-  return /^repositories\/[a-z0-9]+(?:-[a-z0-9]+)*\.yaml$/.test(filename);
+  return /^repositories\/(?:archive\/)?[A-Za-z0-9_.-]+\.yaml$/.test(filename);
+}
+
+export function repositoryStatus(request) {
+  return request.status ?? 'active';
+}
+
+export function repositoryMode(request) {
+  return request.mode ?? 'create';
+}
+
+export function defaultBranch(request, policy) {
+  return request.default_branch ?? policy.default_branch;
+}
+
+export function renderReadme(request) {
+  if (!request.readme_template) return null;
+  const template = readFileSync(path.join(engine, 'templates/readme', `${request.readme_template}.md`), 'utf8');
+  return Mustache.render(template, { name: request.name, description: request.description, license: request.license, url: `https://github.com/gevico/${request.name}` });
+}
+
+export function requestPath(request) {
+  return `repositories/${repositoryStatus(request) === 'active' ? '' : 'archive/'}${request.name}.yaml`;
 }
 
 export function parseYaml(text, label) {
@@ -37,6 +61,7 @@ export async function loadPolicy(directory = engine) {
   if (policy.default_branch !== 'main' || typeof policy.private_branch_protection !== 'boolean' || typeof policy.require_pull_request_reviews !== 'boolean') {
     throw new Error('policy.yml: invalid branch policy');
   }
+  for (const [name, users] of Object.entries(policy.protected_repository_users ?? {})) if (!Array.isArray(users) || users.some((user) => typeof user !== 'string')) throw new Error(`policy.yml: invalid protected users for ${name}`);
   return policy;
 }
 
@@ -48,10 +73,19 @@ export async function validator() {
 export async function validateRequest(request, policy, filename) {
   const validate = await validator();
   if (!validate(request)) throw new Error(`${filename}: ${new Ajv().errorsText(validate.errors, { separator: '; ' })}`);
-  if (filename !== `${request.name}.yaml`) throw new Error(`${filename}: filename must match ${request.name}.yaml`);
-  if (policy.reserved_names.includes(request.name)) throw new Error(`${filename}: reserved repository name`);
-  if (!request.description.trim()) throw new Error(`${filename}: description must describe the repository purpose`);
-  if (request.visibility === 'private' && !policy.private_branch_protection) {
+  const filenamePath = filename.includes('/') ? filename : `repositories/${filename}`;
+  if (filenamePath !== requestPath(request)) throw new Error(`${filename}: filename and directory must match ${requestPath(request)}`);
+  const mode = repositoryMode(request);
+  if (policy.reserved_names.some((name) => name.toLowerCase() === request.name.toLowerCase())) throw new Error(`${filename}: reserved repository name`);
+  if (mode !== 'existing' && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(request.name)) throw new Error(`${filename}: new repository names must use lowercase letters, digits and hyphens`);
+  if (mode !== 'existing' && !request.description.trim()) throw new Error(`${filename}: description must describe the repository purpose`);
+  if (mode === 'existing' && !request.repository_id) throw new Error(`${filename}: existing repository requests require repository_id`);
+  if ((mode === 'fork') !== Boolean(request.fork)) throw new Error(`${filename}: fork source is required only for mode fork`);
+  if (request.template && mode !== 'create') throw new Error(`${filename}: repository templates require mode create`);
+  if (request.license && (mode !== 'create' || request.template)) throw new Error(`${filename}: license selection requires a new repository without a repository template`);
+  if (request.readme_template && mode === 'existing') throw new Error(`${filename}: existing requests manage access and lifecycle; README templates initialize new repositories`);
+  if (request.default_branch && (request.default_branch.startsWith('/') || request.default_branch.includes('..') || request.default_branch.includes('\\') || request.default_branch.includes('\n'))) throw new Error(`${filename}: invalid default branch`);
+  if (mode !== 'existing' && request.visibility === 'private' && !policy.private_branch_protection) {
     throw new Error(`${filename}: private repositories require an organization plan with branch protection; enable the verified capability in policy.yml`);
   }
   const maintainers = [...Object.values(request.access.users), ...Object.values(request.access.teams)];
@@ -65,7 +99,7 @@ export async function validateRequest(request, policy, filename) {
     throw new Error(`${filename}: template is not allowed by policy.yml`);
   }
   for (const [user, role] of Object.entries(request.access.users)) {
-    if (policy.administrator_users.some((admin) => admin.toLowerCase() === user.toLowerCase()) && role !== 'admin') {
+    if ([...policy.administrator_users, ...(policy.protected_repository_users?.[request.name] ?? [])].some((admin) => admin.toLowerCase() === user.toLowerCase()) && role !== 'admin') {
       throw new Error(`${filename}: administrator ${user} must retain admin permission`);
     }
   }
@@ -87,12 +121,24 @@ export async function loadCatalog(directory = root, policyDirectory = engine) {
     }
     throw error;
   }
+  const files = [];
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
     if (entry.name === '.gitkeep' && entry.isFile()) continue;
+    if (entry.name === 'archive' && entry.isDirectory()) {
+      for (const archived of await fs.readdir(path.join(directory, 'repositories/archive'), { withFileTypes: true })) {
+        const filename = `repositories/archive/${archived.name}`;
+        if (!archived.isFile() || !isRepositoryRequest(filename)) throw new Error(`${filename}: only ordinary <name>.yaml files are accepted`);
+        files.push(filename);
+      }
+      continue;
+    }
     if (!entry.isFile() || !isRepositoryRequest(`repositories/${entry.name}`)) throw new Error(`repositories/${entry.name}: only ordinary <name>.yaml files are accepted`);
-    const document = parseYaml(await fs.readFile(path.join(directory, 'repositories', entry.name), 'utf8'), entry.name);
-    const request = await validateRequest(document, policy, entry.name);
-    if (catalog[request.name]) throw new Error(`${entry.name}: duplicate repository name`);
+    files.push(`repositories/${entry.name}`);
+  }
+  for (const filename of files.sort()) {
+    const document = parseYaml(await fs.readFile(path.join(directory, filename), 'utf8'), filename);
+    const request = await validateRequest(document, policy, filename);
+    if (Object.keys(catalog).some((name) => name.toLowerCase() === request.name.toLowerCase())) throw new Error(`${filename}: duplicate repository name`);
     catalog[request.name] = request;
   }
   return { policy, catalog };
@@ -100,17 +146,35 @@ export async function loadCatalog(directory = root, policyDirectory = engine) {
 
 export function effectiveAccess(request, policy) {
   const users = Object.fromEntries(Object.entries(request.access.users).map(([user, role]) => [user.toLowerCase(), role]));
-  for (const user of policy.administrator_users) users[user.toLowerCase()] = 'admin';
+  for (const user of [...policy.administrator_users, ...(policy.protected_repository_users?.[request.name] ?? [])]) users[user.toLowerCase()] = 'admin';
   const teams = { ...request.access.teams };
   for (const team of policy.administrator_teams) teams[team] = 'admin';
   return { users, teams };
 }
 
 export function checkTransition(before, after) {
+  let lifecycle = false;
   for (const name of Object.keys(before)) {
     if (!after[name]) throw new Error(`${name}: removing or renaming a managed repository is prohibited`);
     if (JSON.stringify(before[name].template ?? null) !== JSON.stringify(after[name].template ?? null)) throw new Error(`${name}: initialization template is immutable after registration`);
+    const previous = before[name];
+    const desired = after[name];
+    if (repositoryMode(previous) !== repositoryMode(desired)) throw new Error(`${name}: repository mode is immutable`);
+    for (const field of ['fork', 'readme_template', 'license', 'default_branch']) if (stableJson(previous[field] ?? null) !== stableJson(desired[field] ?? null)) throw new Error(`${name}: ${field} is immutable after registration`);
+    if (previous.repository_id && previous.repository_id !== desired.repository_id) throw new Error(`${name}: repository_id is immutable after registration`);
+    if (repositoryStatus(previous) === 'deleted' && stableJson(previous) !== stableJson(desired)) throw new Error(`${name}: a deleted declaration is immutable`);
+    if (repositoryStatus(previous) !== repositoryStatus(desired)) lifecycle = true;
+    if (repositoryStatus(previous) !== 'active' || repositoryStatus(desired) !== 'active') {
+      const { status: oldStatus, repository_id: oldId, ...oldConfiguration } = previous;
+      const { status: newStatus, repository_id: newId, ...newConfiguration } = desired;
+      if (stableJson(oldConfiguration) !== stableJson(newConfiguration)) throw new Error(`${name}: lifecycle requests must preserve repository attributes and access`);
+    }
   }
+  for (const [name, request] of Object.entries(after)) {
+    if (!before[name] && (repositoryStatus(request) !== 'active' || (repositoryMode(request) !== 'existing' && request.repository_id))) throw new Error(`${name}: new declarations must be active and use repository_id only for mode existing`);
+  }
+  if (lifecycle && changedNames(before, after).some((name) => !before[name] || repositoryStatus(before[name]) === repositoryStatus(after[name]))) throw new Error('Lifecycle requests must be submitted separately from creation or configuration changes');
+  return { lifecycle };
 }
 
 export function stableJson(value) {
@@ -130,7 +194,12 @@ export function changedNames(before, after) {
 export function terraformValues(catalog, policy) {
   return {
     organization: policy.organization,
-    repositories: Object.fromEntries(Object.entries(catalog).map(([name, request]) => [name, {
+    repositories: Object.fromEntries(Object.entries(catalog).filter(([, request]) => repositoryStatus(request) !== 'deleted').map(([name, request]) => [name, {
+      archived: repositoryStatus(request) === 'archived',
+      mode: repositoryMode(request),
+      default_branch: defaultBranch(request, policy),
+      license: request.license ?? null,
+      readme: renderReadme(request),
       description: request.description,
       visibility: request.visibility,
       topics: request.topics ?? [],

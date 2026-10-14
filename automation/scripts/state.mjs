@@ -69,10 +69,16 @@ export class StateStore {
     if (response.status !== 200 && response.status !== 204) throw new Error(`Git state read failed (${response.status}): ${this.log ?? ''}`);
     const data = response.status === 204 ? null : await response.json();
     const names = new Set();
+    const repositories = {};
+    const addresses = new Set();
     for (const resource of data?.resources ?? []) {
-      if (resource.type === 'github_repository') for (const instance of resource.instances ?? []) names.add(instance.index_key);
+      for (const instance of resource.instances ?? []) addresses.add(`${resource.type}.${resource.name}[${JSON.stringify(instance.index_key)}]`);
+      if (resource.type === 'github_repository') for (const instance of resource.instances ?? []) {
+        names.add(instance.index_key);
+        repositories[instance.index_key] = { id: instance.attributes.repo_id, archived: instance.attributes.archived, archive_on_destroy: instance.attributes.archive_on_destroy ?? false };
+      }
     }
-    return { names, version: data ? digest(data) : null, serial: data?.serial ?? 0, lineage: data?.lineage ?? null };
+    return { names, repositories, addresses, version: data ? digest(data) : null, serial: data?.serial ?? 0, lineage: data?.lineage ?? null };
   }
 
   async close() {

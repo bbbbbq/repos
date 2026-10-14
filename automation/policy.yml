@@ -13,3 +13,8 @@ reserved_names:
   - github
 private_branch_protection: false
 require_pull_request_reviews: true
+protected_repository_users:
+  pigpig-runrun-docx: [bbbbbq]
+  GW100: [bbbbbq]
+  pigpig-runrun: [bbbbbq]
+  sglang-omni-rocm: [bbbbbq]

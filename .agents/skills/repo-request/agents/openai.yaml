@@ -1,6 +1,6 @@
 interface:
   display_name: "Repository request"
-  short_description: "Generate gevico repository YAML from natural language"
-  default_prompt: "Use $repo-request to create a gevico repository request from my description."
+  short_description: "Manage gevico repositories through natural-language YAML"
+  default_prompt: "Use $repo-request to prepare a gevico repository or access request from my description."
 policy:
   allow_implicit_invocation: true

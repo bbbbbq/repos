@@ -17,7 +17,26 @@
 - 仓库 variable `WRITE_APP_CLIENT_ID`：写入 App 的 Client ID。
 - `production` 环境 secret `WRITE_APP_PRIVATE_KEY`：写入 App 的完整 PEM 私钥。
 
-官方 `actions/create-github-app-token` 在每个任务中获取安装令牌。工作流明确设置 `owner: gevico`，覆盖该 App 安装范围内的仓库。
+程序使用官方 `@octokit/auth-app` 在任务中获取安装令牌，核实安装组织为 `gevico`、覆盖全部仓库且没有挂起。预览使用读取 App。执行先获得全安装范围的只读令牌检查身份；生命周期写入令牌按真实仓库 ID 限定范围，并包含私有状态仓库。任务结束后撤销临时令牌。
+
+## 跨组织 Fork 和凭证检查
+
+在 `production` 环境保存 `FORK_USER_TOKEN`，令牌属于组织所有者 `zevorn`，能够读取来源并在 `gevico` 创建 Fork。当前 `gh` 登录令牌可以通过以下命令保存，令牌内容经标准输入传递：
+
+```bash
+gh auth token --hostname github.com --user zevorn | gh secret set FORK_USER_TOKEN --repo gevico/repos --env production
+gh variable set FORK_ENABLED --repo gevico/repos --body true
+```
+
+跨组织 Fork 由用户令牌执行。仓库管理、权限、归档和删除由 GitHub App 执行。GitHub 对 Fork App 的要求是同时安装到来源和目标账户；外部来源使用上述用户凭证。[GitHub Fork API](https://docs.github.com/en/rest/repos/forks#create-a-fork)
+
+Credentials 工作流每天在 UTC 01:17 检查用户身份和组织所有者权限，也支持手动执行。令牌失效、缺失或权限不足时，自动在 `gevico/repos` 创建 Issue 并提及 `@zevorn`。已有同类未关闭 Issue 时复用；凭证恢复后关闭对应 Issue。Apply 的 Fork 凭证失败也使用该提醒。`FORK_ENABLED=true` 启用每日检查和跨组织 Fork 申请。
+
+OAuth 令牌连续一年未使用会被 GitHub 撤销，用户、授权应用或 GitHub 也可以撤销令牌。更新上述 secret 后重新运行 Credentials 或失败的 Apply。[GitHub 令牌规则](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/token-expiration-and-revocation)
+
+## 组织成员创建权限
+
+组织普通成员创建公开、私有和内部仓库的权限全部关闭。`zevorn` 为组织所有者，保留手动创建权限；自动化使用已安装的 App 或经过配置的 Fork 用户身份。`bbbbbq` 为普通成员，在政策列出的四个仓库保留直接 `admin` 授权。
 
 ## 私有状态仓库和加密密钥
 
@@ -65,6 +84,8 @@ npm --prefix automation run bootstrap -- --configure
 ```
 
 配置包括 `main` 的必需审核、CODEOWNERS 审核、最新修改批准、严格更新要求，以及 `Validate` 和 `request/check` 必需检查。`preview` 和 `production` 环境限定部署分支为 `main`。审核者须能够独立审核申请人的 PR。
+
+管理仓库允许普通合并（Create a merge commit），保留原始提交历史。压缩合并作为可选方法；申请人和审核者可以在 PR 中选择合并方法，程序支持这两种方法产生的合并提交。
 
 ## 初始化自动化
 
