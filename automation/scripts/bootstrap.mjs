@@ -22,7 +22,7 @@ try {
   if (repository.private || repository.fork || repository.archived) throw new Error('The management repository must be public, active, and owned directly by gevico');
   if (values.configure) {
     if (repository.default_branch !== 'main') throw new Error('Push the verified implementation to main before configuring protection');
-    await client.rest.repos.update({ owner, repo, allow_squash_merge: true, allow_merge_commit: false, allow_rebase_merge: false, delete_branch_on_merge: true });
+    await client.rest.repos.update({ owner, repo, allow_squash_merge: true, allow_merge_commit: true, allow_rebase_merge: false, delete_branch_on_merge: true });
     for (const environment_name of ['preview', 'production']) {
       await client.request('PUT /repos/{owner}/{repo}/environments/{environment_name}', { owner, repo, environment_name, deployment_branch_policy: { protected_branches: false, custom_branch_policies: true } });
       const { data: branches } = await client.request('GET /repos/{owner}/{repo}/environments/{environment_name}/deployment-branch-policies', { owner, repo, environment_name });
@@ -36,7 +36,7 @@ try {
       rules: [
         { type: 'deletion' },
         { type: 'non_fast_forward' },
-        { type: 'pull_request', parameters: { required_approving_review_count: 1, dismiss_stale_reviews_on_push: true, require_code_owner_review: true, require_last_push_approval: true, required_review_thread_resolution: true, allowed_merge_methods: ['squash'] } },
+        { type: 'pull_request', parameters: { required_approving_review_count: 1, dismiss_stale_reviews_on_push: true, require_code_owner_review: true, require_last_push_approval: true, required_review_thread_resolution: true, allowed_merge_methods: ['merge', 'squash'] } },
         { type: 'required_status_checks', parameters: { required_status_checks: [{ context: 'Validate', integration_id: 15368 }, { context: 'request/check' }], strict_required_status_checks_policy: true } },
       ],
     };
