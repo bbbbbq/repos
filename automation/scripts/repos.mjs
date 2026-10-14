@@ -4,7 +4,6 @@ import { parseArgs } from 'node:util';
 import { root, loadCatalog, loadPolicy, validateRequest, requestYaml, terraformValues, writeJson, repositoryStatus, requestPath, checkTransition } from './config.mjs';
 import { github, inspectCatalog, findRepository } from './github.mjs';
 import { existingRequest } from './onboarding.mjs';
-import { run } from './runtime.mjs';
 
 function assignment(value) {
   const [identity, role, extra] = value.split(':');
@@ -110,7 +109,7 @@ async function main() {
   }
   if (command === 'render') {
     if (!values.output) throw new Error('render requires --output');
-    await writeJson(path.resolve(root, values.output), { ...terraformValues(catalog, policy), commit_name: (await run('git', ['config', 'user.name'])).trim(), commit_email: (await run('git', ['config', 'user.email'])).trim() });
+    await writeJson(path.resolve(root, values.output), terraformValues(catalog, policy));
     console.log(`Rendered Terraform input: ${values.output}`);
     return;
   }
