@@ -1,1 +1,1 @@
-await import('../../../scripts/check-artifact.mjs');
+await import('../../../automation/scripts/check-artifact.mjs');

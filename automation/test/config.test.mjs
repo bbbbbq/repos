@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { root, work, loadPolicy, loadCatalog, parseYaml, validateRequest, checkTransition, effectiveAccess, terraformValues, requestYaml } from '../scripts/config.mjs';
+import { root, engine, work, loadPolicy, loadCatalog, parseYaml, validateRequest, checkTransition, effectiveAccess, terraformValues, requestYaml } from '../scripts/config.mjs';
 
 const execute = promisify(execFile);
 const policy = await loadPolicy();
@@ -17,7 +17,7 @@ const request = {
 };
 
 test('request rendering preserves user, team and topic intent through YAML and Terraform input', async () => {
-  const { stdout } = await execute(process.execPath, ['scripts/repos.mjs', 'request', '--name', 'coach', '--description', request.description, '--maintainer', 'zevorn', '--team', 'ai_infra-pigpig-runrun:maintain', '--topic', 'qemu'], { cwd: root });
+  const { stdout } = await execute(process.execPath, [path.join(engine, 'scripts/repos.mjs'), 'request', '--name', 'coach', '--description', request.description, '--maintainer', 'zevorn', '--team', 'ai_infra-pigpig-runrun:maintain', '--topic', 'qemu'], { cwd: root });
   const rendered = parseYaml(stdout, 'coach.yaml');
   assert.deepEqual(rendered, request);
   await validateRequest(rendered, policy, 'coach.yaml');
@@ -54,7 +54,15 @@ test('catalog loading rejects symlinked requests and unrelated files', async () 
   const file = path.join(directory, 'repositories/coach.yaml');
   try {
     await fs.writeFile(file, requestYaml(request));
+    await fs.writeFile(path.join(directory, 'repositories/README.md'), '# Repository requests\n');
+    await fs.mkdir(path.join(directory, 'repositories/docs'));
+    await fs.writeFile(path.join(directory, 'repositories/docs/requesting.md'), '# Requesting a repository\n');
     assert.deepEqual((await loadCatalog(directory)).catalog.coach, request);
+    const output = path.join(directory, 'rendered.json');
+    await execute(process.execPath, [path.join(engine, 'scripts/repos.mjs'), 'render', '--directory', path.relative(root, directory), '--output', path.relative(root, output)], { cwd: engine });
+    const rendered = JSON.parse(await fs.readFile(output, 'utf8'));
+    assert.equal(rendered.repositories.coach.description, request.description);
+    assert.deepEqual(rendered.repositories.coach.teams, request.access.teams);
     await fs.rename(file, path.join(directory, 'original.yaml'));
     await fs.symlink(path.join(directory, 'original.yaml'), file);
     await assert.rejects(loadCatalog(directory), /ordinary/);

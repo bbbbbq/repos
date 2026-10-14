@@ -4,7 +4,7 @@
 
 README 面向申请人，说明项目用途、自然语言申请入口、审核流程和文档导航。申请文档解释字段和权限；部署文档列出准确的参数、权限和执行命令；运行文档解释结果、导入和恢复。
 
-实施时的详细设计保存在 `plan.md`，来源证据保存在 `research.md`。申请人需要理解的行为写入 README 和对应操作文档。
+实施设计保存在 `automation/docs/plan.md`，来源证据保存在 `automation/docs/research.md`。申请说明位于 `repositories/README.md`，部署、运行与验证文档位于 `repositories/docs/`。申请人需要理解的行为写入根目录 README 和对应操作文档。
 
 ## 表述与排版
 
@@ -16,7 +16,7 @@ README 使用 GitHub 原生 Markdown，保留清晰的标题层级、导航、�
 
 ## 配置与来源
 
-字段与角色以 `schema/repository.schema.json` 和 `policy.yml` 为准。文档链接使用相对路径，外部技术资料链接到官方文档或实现源代码。
+字段与角色以 `automation/schema/repository.schema.json` 和 `automation/policy.yml` 为准。文档链接使用相对路径，外部技术资料链接到官方文档或实现源代码。
 
 凭证文档只展示变量名称、权限和保存位置。私钥、令牌和账户秘密保存到指定的秘密管理服务。仓库名称、团队和用户名的示例与实际部署参数应明确区分。
 

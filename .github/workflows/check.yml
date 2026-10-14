@@ -31,21 +31,21 @@ jobs:
         with:
           go-version: '1.26.3'
           cache: false
-      - run: npm ci --no-fund --no-audit
+      - run: npm --prefix automation ci --no-fund --no-audit
         env:
           TMPDIR: ${{ github.workspace }}/.work/tmp
-      - run: npm run check
+      - run: npm --prefix automation run check
         env:
           TMPDIR: ${{ github.workspace }}/.work/tmp
-      - run: npm run backend:build
+      - run: npm --prefix automation run backend:build
         env:
           TMPDIR: ${{ github.workspace }}/.work/tmp
       - uses: ./.github/actions/check-artifact
         env:
           CONTROL_TOKEN: ${{ github.token }}
           TMPDIR: ${{ github.workspace }}/.work/tmp
-      - run: terraform -chdir=terraform fmt -check
-      - run: terraform -chdir=terraform init -backend=false -input=false -lockfile=readonly
+      - run: terraform -chdir=automation/terraform fmt -check
+      - run: terraform -chdir=automation/terraform init -backend=false -input=false -lockfile=readonly
         env:
           TMPDIR: ${{ github.workspace }}/.work/tmp
-      - run: terraform -chdir=terraform validate
+      - run: terraform -chdir=automation/terraform validate

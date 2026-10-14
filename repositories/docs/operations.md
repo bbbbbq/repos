@@ -19,7 +19,7 @@ GitHub 中已经存在但未登记到状态的同名仓库会产生冲突。管�
 导入需要真实的写入 GitHub App 安装令牌、`STATE_AGE_KEY` 和 `STATE_AGE_RECIPIENT`。后端使用 `gevico/repos-state` 的 `main` 分支。先运行本地配置校验和 Terraform 输入生成：
 
 ```bash
-node scripts/repos.mjs render --output .work/import/requests.auto.tfvars.json
+node automation/scripts/repos.mjs render --output .work/import/requests.auto.tfvars.json
 ```
 
 使用与 Apply 相同的 `StateStore.open()` 和 `prepareTerraform()` 初始化工作目录，通过 `run()` 传递该会话的 `env` 执行官方 `terraform import`，并在结束时调用 `store.close()`。资源地址使用 `github_repository.managed["仓库名称"]`、`github_branch_default.managed["仓库名称"]` 和 `github_repository_collaborators.managed["仓库名称"]`。已有同名 ruleset 根据真实 ruleset ID 导入到 `github_repository_ruleset.managed["仓库名称"]`。
@@ -36,7 +36,7 @@ node scripts/repos.mjs render --output .work/import/requests.auto.tfvars.json
 
 工作流中断可能留下锁分支。确认相关 Apply 已全部终止，读取锁中的 ID、操作和时间后，再使用后端文档中的人工解锁流程。锁分支由 Git 后端创建和删除；普通申请不具备解锁权限。
 
-管理员可以在配置写入 App 临时令牌和对应 age 密钥的受信任环境中运行 `npm run backend:build` 与 `npm run backend:check`。检查会读取真实状态，让两个独立后端进程竞争同一远程锁，核验 HTTP 409 和锁持有者 ID，并释放检查创建的锁。状态内容保持不变。
+管理员可以在配置写入 App 临时令牌和对应 age 密钥的受信任环境中运行 `npm --prefix automation run backend:build` 与 `npm --prefix automation run backend:check`。检查会读取真实状态，让两个独立后端进程竞争同一远程锁，核验 HTTP 409 和锁持有者 ID，并释放检查创建的锁。状态内容保持不变。
 
 PR 审核 artifact 保留 90 天。合并前记录过期时，重新运行 Request 并审核最新预览。Apply 首次读取并核验 artifact 后，将加密审核记录保存到 `records/reviews/<PR>/<head>.json.age`，同一批准提交的重试读取该持久记录。
 

@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { root, work, writeJson, terraformValues } from './config.mjs';
+import { root, engine, work, writeJson, terraformValues } from './config.mjs';
 
 const execute = promisify(execFile);
 export async function run(command, args, options = {}) {
@@ -18,7 +18,7 @@ export async function prepareTerraform(catalog, policy, store) {
   const directory = path.join(work, 'terraform');
   await fs.mkdir(directory, { recursive: true });
   for (const filename of ['versions.tf', 'variables.tf', 'main.tf', 'outputs.tf', '.terraform.lock.hcl']) {
-    await fs.copyFile(path.join(root, 'terraform', filename), path.join(directory, filename));
+    await fs.copyFile(path.join(engine, 'terraform', filename), path.join(directory, filename));
   }
   await writeJson(path.join(directory, 'requests.auto.tfvars.json'), terraformValues(catalog, policy));
   await run('terraform', ['init', '-reconfigure', '-input=false', '-lockfile=readonly'], { cwd: directory, env: store.env });

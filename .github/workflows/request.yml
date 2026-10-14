@@ -52,10 +52,10 @@ jobs:
         with:
           go-version: '1.26.3'
           cache: false
-      - run: npm ci --no-fund --no-audit --ignore-scripts
+      - run: npm --prefix automation ci --no-fund --no-audit --ignore-scripts
         env:
           TMPDIR: ${{ github.workspace }}/.work/tmp
-      - run: npm run backend:build
+      - run: npm --prefix automation run backend:build
         if: vars.AUTOMATION_ENABLED == 'true'
         env:
           TMPDIR: ${{ github.workspace }}/.work/tmp

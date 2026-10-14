@@ -4,8 +4,13 @@ import { createHash } from 'node:crypto';
 import Ajv from 'ajv';
 import { parseDocument, stringify } from 'yaml';
 
-export const root = path.resolve(import.meta.dirname, '..');
+export const engine = path.resolve(import.meta.dirname, '..');
+export const root = path.resolve(engine, '..');
 export const work = path.join(root, '.work');
+
+export function isRepositoryDocumentation(filename) {
+  return filename === 'repositories/README.md' || filename === 'repositories/docs' || filename.startsWith('repositories/docs/');
+}
 
 export function parseYaml(text, label) {
   if (Buffer.byteLength(text) > 65_536) throw new Error(`${label}: file exceeds 64 KiB`);
@@ -16,7 +21,7 @@ export function parseYaml(text, label) {
   return document.toJS({ maxAliasCount: 0 });
 }
 
-export async function loadPolicy(directory = root) {
+export async function loadPolicy(directory = engine) {
   const policy = parseYaml(await fs.readFile(path.join(directory, 'policy.yml'), 'utf8'), 'policy.yml');
   if (policy.organization !== 'gevico' || policy.management_repository !== 'repos') {
     throw new Error('policy.yml must target gevico/repos');
@@ -36,7 +41,7 @@ export async function loadPolicy(directory = root) {
 }
 
 export async function validator() {
-  const schema = JSON.parse(await fs.readFile(path.join(root, 'schema/repository.schema.json'), 'utf8'));
+  const schema = JSON.parse(await fs.readFile(path.join(engine, 'schema/repository.schema.json'), 'utf8'));
   return new Ajv({ allErrors: true, strict: true }).compile(schema);
 }
 
@@ -70,12 +75,14 @@ export async function validateRequest(request, policy, filename) {
   return request;
 }
 
-export async function loadCatalog(directory = root, policyDirectory = root) {
+export async function loadCatalog(directory = root, policyDirectory = engine) {
   const policy = await loadPolicy(policyDirectory);
   const catalog = {};
   const entries = await fs.readdir(path.join(directory, 'repositories'), { withFileTypes: true });
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
     if (entry.name === '.gitkeep' && entry.isFile()) continue;
+    if (entry.name === 'README.md' && entry.isFile()) continue;
+    if (entry.name === 'docs' && entry.isDirectory()) continue;
     if (!entry.isFile() || !/^[a-z0-9]+(?:-[a-z0-9]+)*\.yaml$/.test(entry.name)) throw new Error(`repositories/${entry.name}: only ordinary <name>.yaml files are accepted`);
     const document = parseYaml(await fs.readFile(path.join(directory, 'repositories', entry.name), 'utf8'), entry.name);
     const request = await validateRequest(document, policy, entry.name);

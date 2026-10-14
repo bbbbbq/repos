@@ -24,8 +24,8 @@
 以组织所有者身份登录 `gh`，在克隆后的管理仓库运行：
 
 ```bash
-npm ci
-npm run state:setup
+npm --prefix automation ci
+npm --prefix automation run state:setup
 ```
 
 程序创建私有 `gevico/repos-state`，初始化 `main`，生成 age X25519 密钥并保存以下配置。状态仓库访问范围为组织所有者和具有相应权限的 App。
@@ -39,7 +39,7 @@ npm run state:setup
 
 密钥的本地备份为 `.work/state-age-key.txt`，文件权限为 `0600`。请将其保存到自己的密码管理器或安全备份位置。重复配置使用已有密钥；仓库已有公钥而本地密钥缺失时，程序要求恢复对应密钥。
 
-状态后端使用 [terraform-backend-git v0.1.12](https://github.com/plumber-cd/terraform-backend-git/tree/v0.1.12) 的 Git 存储、远程锁和 SOPS/age 加密。后端只在任务运行期间监听 runner 的 `127.0.0.1`，由 Terraform 的 HTTP 后端访问。任务结束后终止后端进程。构建和提交身份配置见 [后端说明](../backend/README.md)。
+状态后端使用 [terraform-backend-git v0.1.12](https://github.com/plumber-cd/terraform-backend-git/tree/v0.1.12) 的 Git 存储、远程锁和 SOPS/age 加密。后端只在任务运行期间监听 runner 的 `127.0.0.1`，由 Terraform 的 HTTP 后端访问。任务结束后终止后端进程。构建和提交身份配置见 [后端说明](../../automation/backend/README.md)。
 
 私有状态仓库的文件：
 
@@ -55,13 +55,13 @@ Request 使用只读 App 读取状态，将预览记录加密后上传为 Action
 
 ## 仓库审核规则
 
-将审核负责人写入 `.github/CODEOWNERS`，并在 `policy.yml` 指定目标仓库的管理员。当前配置使用组织管理员 `zevorn`，组织已有团队可加入允许清单。
+将审核负责人写入 `.github/CODEOWNERS`，并在 `automation/policy.yml` 指定目标仓库的管理员。当前配置使用组织管理员 `zevorn`，组织已有团队可加入允许清单。
 
 实现推送到 `main` 后，以组织管理员登录的 `gh` 运行：
 
 ```bash
-npm run bootstrap -- --check
-npm run bootstrap -- --configure
+npm --prefix automation run bootstrap -- --check
+npm --prefix automation run bootstrap -- --configure
 ```
 
 配置包括 `main` 的必需审核、CODEOWNERS 审核、最新修改批准、严格更新要求，以及 `Validate` 和 `request/check` 必需检查。`preview` 和 `production` 环境限定部署分支为 `main`。审核者须能够独立审核申请人的 PR。
@@ -81,4 +81,4 @@ gh workflow run apply.yml --repo gevico/repos --ref main
 
 用明确登记的真实仓库申请验证完整流程：通过 fork 或授权的申请身份创建 PR，管理员检查预览并审核，合并后确认目标仓库、默认分支、直接授权和分支规则。再通过配置 PR 验证权限修改与撤销，以及同一提交的重复执行。
 
-私有仓库分支保护能力在 `policy.yml` 中单独记录。管理员核实组织套餐和实际 API 能力后，才能设置 `private_branch_protection: true`。
+私有仓库分支保护能力在 `automation/policy.yml` 中单独记录。管理员核实组织套餐和实际 API 能力后，才能设置 `private_branch_protection: true`。

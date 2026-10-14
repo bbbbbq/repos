@@ -19,7 +19,7 @@
 - 校验、预览、Terraform 执行、权限设置、失败恢复和结果核验都由 GitHub 托管 runner 执行，任务结束后运行环境由 GitHub 回收。
 - 管理仓库为公开的 `gevico/repos`，默认分支为 `main`，允许通过 fork 提交申请。
 - 目标仓库支持 `public` 和 `private`，默认值为 `public`。公开管理仓库中的名称、描述和权限申请对公众可见；私有目标仓库的代码访问由 GitHub 权限控制。
-- 审核负责人和目标仓库管理员使用组织所有者 `zevorn`，在 CODEOWNERS 和 `policy.yml` 中配置。组织已有团队由 `allowed_teams` 指定，团队管理员授权由 `administrator_teams` 配置。
+- 审核负责人和目标仓库管理员使用组织所有者 `zevorn`，在 CODEOWNERS 和 `automation/policy.yml` 中配置。组织已有团队由 `allowed_teams` 指定，团队管理员授权由 `administrator_teams` 配置。
 - Terraform 状态由 `terraform-backend-git v0.1.12` 使用 SOPS/age 加密，保存到私有 `gevico/repos-state`。远程 Git 锁分支提供原子锁定，Git 提交保存版本。后端运行在 Actions runner 内，Terraform 通过本地 HTTP 访问。[Git 后端](https://github.com/plumber-cd/terraform-backend-git/tree/v0.1.12)、[HTTP 后端](https://developer.hashicorp.com/terraform/language/backend/http)
 - 部署参数包括 GitHub App Client ID、私钥、age 密钥、公钥及状态提交身份。官方认证 Action 自动取得安装令牌。全部运行和持久存储使用 GitHub 资源。
 
@@ -39,7 +39,7 @@
 
 权限角色支持 `pull`、`triage`、`push`、`maintain`、`admin`。每个仓库必须指定维护负责人：个人或团队取得 `maintain` 或 `admin` 权限。管理端始终为政策中的管理员设置 `admin` 权限。
 
-管理员维护 `policy.yml`，定义保留名称、团队清单、模板清单及默认仓库规则。YAML 解析拒绝重复键，Schema 拒绝未知字段及无效字段值，配置变更检查拒绝名称变更、文件重命名和配置条目删除。配置字段作为数据传递到库和 Terraform。
+管理员维护 `automation/policy.yml`，定义保留名称、团队清单、模板清单及默认仓库规则。YAML 解析拒绝重复键，Schema 拒绝未知字段及无效字段值，配置变更检查拒绝名称变更、文件重命名和配置条目删除。配置字段作为数据传递到库和 Terraform。
 
 资源范围包括已登记目标仓库的属性、默认分支、直接团队授权、直接个人授权和分支保护。团队和组织成员由组织管理员维护。已有同名仓库需要经过管理员审核的导入操作，再进入本管理范围。
 
@@ -68,6 +68,8 @@ flowchart TD
 `request.yml` 处理指向 `main` 的 PR。使用默认分支上的工作流、脚本、依赖锁定文件和 Terraform 配置，从 PR 的明确提交读取允许路径下的普通 YAML 文件作为申请数据。检查文件类型、路径和 Schema 后，再进入预览步骤。[pull_request_target 事件说明](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request_target)
 
 普通申请 PR 修改 `repositories/` 中的配置。管理程序、Schema、政策和工作流的修改通过独立的管理员维护 PR 审核，并执行对应验证。
+
+`repositories/README.md` 和 `repositories/docs/` 保存使用文档。文档通过维护 PR 审核；仓库申请只修改普通 YAML 文件。申请读取程序与 PR 文件分类使用相同的文档路径规则。
 
 检查实际用户、团队和模板是否存在，判断目标名称是否与已登记或未登记仓库冲突。外部协作者须满足组织政策；预览区分直接授权和等待接受的邀请。
 
@@ -151,18 +153,18 @@ PR 的必需检查确认其 base SHA 已成功应用。上一条合并的配置�
 ## 文件与职责
 
 - `repositories/`：申请人提交的目标仓库声明。
-- `schema/repository.schema.json`：配置格式和字段约束。
-- `policy.yml`：管理员维护的组织名称、团队、模板和默认政策。
-- `scripts/`：配置读取与校验、PR 数据提取、变更预览处理、执行计划检查和结果核验。
-- `terraform/`：Provider、仓库资源、默认分支、直接授权清单、分支规则及状态后端配置。
+- `automation/schema/repository.schema.json`：配置格式和字段约束。
+- `automation/policy.yml`：管理员维护的组织名称、团队、模板和默认政策。
+- `automation/scripts/`：配置读取与校验、PR 数据提取、变更预览处理、执行计划检查和结果核验。
+- `automation/terraform/`：Provider、仓库资源、默认分支、直接授权清单、分支规则及状态后端配置。
 - `.github/workflows/request.yml`：PR 检查及只读预览。
 - `.github/workflows/apply.yml`：合并后创建、权限管理及核验。
-- `backend/`：Git 后端的提交身份配置和依赖许可证。
+- `automation/backend/`：Git 后端的提交身份配置和依赖许可证。
 - `.agents/skills/repo-request/`：自然语言申请 skill 及其界面元数据。
 - `.github/CODEOWNERS`：管理团队审核范围。
 - `.github/PULL_REQUEST_TEMPLATE.md`：仓库用途、维护负责人和权限申请说明。
-- `docs/`：申请方式、管理员部署、已有仓库导入和故障恢复操作。
-- `docs/documentation-guidelines.md`：面向项目文档的内容、命令、来源和排版规范。
+- `repositories/README.md` 与 `repositories/docs/`：申请方式、管理员部署、已有仓库导入、故障恢复和验证记录。
+- `automation/docs/documentation-guidelines.md`：面向项目文档的内容、命令、来源和排版规范。
 - `README.md`：申请入口、配置字段、审核规则及执行结果查询方式。
 
 本任务的完整交付范围由上述流程及 AC-1 至 AC-10 共同确定。实现范围限定在 `gevico/repos` 的管理程序、仓库 skill、文档和经批准登记的 GitHub 仓库资源。

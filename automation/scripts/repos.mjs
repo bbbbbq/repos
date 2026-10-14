@@ -29,7 +29,7 @@ async function main() {
   } });
   if (command === 'request') {
     const policy = await loadPolicy();
-    const request = values['json-file'] ? JSON.parse(await fs.readFile(values['json-file'], 'utf8')) : {
+    const request = values['json-file'] ? JSON.parse(await fs.readFile(path.resolve(root, values['json-file']), 'utf8')) : {
       name: values.name,
       description: values.description,
       visibility: values.visibility,
@@ -53,7 +53,7 @@ async function main() {
     process.stdout.write(requestYaml(request));
     return;
   }
-  const { catalog, policy } = await loadCatalog(values.directory ? path.resolve(values.directory) : root);
+  const { catalog, policy } = await loadCatalog(values.directory ? path.resolve(root, values.directory) : root);
   if (command === 'validate') {
     if (values.online) await inspectCatalog(github(), catalog, policy);
     console.log(`Validated ${Object.keys(catalog).length} repository request(s) for ${policy.organization}.`);
@@ -61,7 +61,7 @@ async function main() {
   }
   if (command === 'render') {
     if (!values.output) throw new Error('render requires --output');
-    await writeJson(path.resolve(values.output), terraformValues(catalog, policy));
+    await writeJson(path.resolve(root, values.output), terraformValues(catalog, policy));
     console.log(`Rendered Terraform input: ${values.output}`);
     return;
   }

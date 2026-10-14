@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { root, work, writeJson } from './config.mjs';
+import { engine, work, writeJson } from './config.mjs';
 import { run } from './runtime.mjs';
 
 export async function buildBackend() {
@@ -12,13 +12,13 @@ export async function buildBackend() {
   const source = path.join(work, 'backend-source-v0.1.12');
   await fs.cp(module.Dir, source, { recursive: true, force: false });
   const overlay = path.join(work, 'backend-overlay.json');
-  await writeJson(overlay, { Replace: { [path.join(source, 'storages/git/git.go')]: path.join(root, 'backend/git.go') } });
+  await writeJson(overlay, { Replace: { [path.join(source, 'storages/git/git.go')]: path.join(engine, 'backend/git.go') } });
   const binary = path.join(work, 'bin/terraform-backend-git');
   await run('go', ['build', '-mod=readonly', '-overlay', overlay, '-o', binary, '.'], { cwd: source, env });
   console.log('Built terraform-backend-git v0.1.12 with repository commit identity and Signed-off-by');
   return binary;
 }
 
-if (process.argv[1] === path.join(root, 'scripts/build-backend.mjs')) {
+if (process.argv[1] === path.join(engine, 'scripts/build-backend.mjs')) {
   buildBackend().catch((error) => { console.error(error.message); process.exitCode = 1; });
 }

@@ -1,6 +1,6 @@
 # 仓库申请
 
-在项目根目录使用 `$repo-request`，描述仓库名称、用途、可见性和维护负责人。助手根据 `policy.yml` 生成配置，通过 `npm run validate` 核验后，保存到 `repositories/<name>.yaml`。
+在项目根目录使用 `$repo-request`，描述仓库名称、用途、可见性和维护负责人。助手根据 `automation/policy.yml` 生成配置，通过 `npm --prefix automation run validate` 核验后，保存到 `repositories/<name>.yaml`。
 
 ## 配置字段
 
@@ -26,12 +26,12 @@
 
 申请 PR 只修改 `repositories/` 下的普通 YAML 文件。管理程序、政策和工作流使用独立的维护 PR。名称、初始化模板和申请文件身份在登记后保持稳定。
 
-运行 `npm run validate`。本地 `gh` 已登录时，可运行 `npm run validate -- --online` 核验真实身份。然后提交 PR，检查 Actions 展示的变更预览。
+运行 `npm --prefix automation run validate`。本地 `gh` 已登录时，可运行 `npm --prefix automation run validate -- --online` 核验真实身份。然后提交 PR，检查 Actions 展示的变更预览。
 
 管理员审核并合并后，Apply 工作流创建目标仓库并设置权限。成功结果包含仓库链接；失败结果包含对应工作流和恢复文档。
 
 ## 使用仓库 skill
 
-技能文件位于 `.agents/skills/repo-request/SKILL.md`。支持 `.agents/skills` 自动发现的助手可在克隆后使用 `$repo-request`；其他支持 SKILL.md 的助手可以直接读取该文件并遵循其说明。依赖安装使用项目根目录的 `npm ci`。
+技能文件位于 `.agents/skills/repo-request/SKILL.md`。支持 `.agents/skills` 自动发现的助手可在克隆后使用 `$repo-request`；其他支持 SKILL.md 的助手可以直接读取该文件并遵循其说明。依赖安装在项目根目录运行 `npm --prefix automation ci`。
 
 需要提交 PR 时，明确要求助手提交。提交采用当前 Git 配置中的姓名和邮箱，通过 `git commit -s` 添加签名。

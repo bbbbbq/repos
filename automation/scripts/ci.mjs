@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { root, work, loadCatalog, loadPolicy, checkTransition, changedNames, digest, writeJson } from './config.mjs';
+import { root, engine, work, loadCatalog, loadPolicy, checkTransition, changedNames, digest, writeJson, isRepositoryDocumentation } from './config.mjs';
 import { github, remoteCatalog, inspectCatalog, verifyCatalog, comment, status } from './github.mjs';
 import { StateStore } from './state.mjs';
 import { prepareTerraform, terraformPlan, terraformApply } from './runtime.mjs';
@@ -29,15 +29,15 @@ async function request() {
   const head = pullRequest.head.sha;
   await status(control, owner, repo, head, 'pending', 'Validating repository request', 'request/check');
   const files = await control.paginate(control.rest.pulls.listFiles, { owner, repo, pull_number: number });
-  const requests = files.filter((file) => file.filename.startsWith('repositories/'));
+  const requests = files.filter((file) => file.filename.startsWith('repositories/') && !isRepositoryDocumentation(file.filename));
   if (!requests.length) {
     await status(control, owner, repo, head, 'success', 'Maintenance PR; repository requests unchanged', 'request/check');
     return;
   }
-  if (files.some((file) => !file.filename.startsWith('repositories/'))) throw new Error('Repository requests must be submitted separately from management code or policy changes');
+  if (files.some((file) => !file.filename.startsWith('repositories/') || isRepositoryDocumentation(file.filename))) throw new Error('Repository requests must be submitted separately from management code, policy or documentation changes');
   if (requests.some((file) => ['removed', 'renamed'].includes(file.status))) throw new Error('Removing or renaming repository requests is prohibited');
   if (process.env.GITHUB_SHA !== pullRequest.base.sha) throw new Error('Trusted workflow source differs from the current PR base; rerun Request on main');
-  if (process.env.AUTOMATION_ENABLED !== 'true') throw new Error('Organization automation is not configured; administrator must complete docs/setup.md');
+  if (process.env.AUTOMATION_ENABLED !== 'true') throw new Error('Organization automation is not configured; administrator must complete repositories/docs/setup.md');
   const reader = github();
   const before = await remoteCatalog(control, owner, repo, pullRequest.base.sha, path.join(work, 'base'));
   const after = await remoteCatalog(control, owner, repo, head, path.join(work, 'head'));
@@ -55,7 +55,7 @@ async function request() {
   if (stateBefore.version !== stateAfter.version) throw new Error('Terraform state changed during preview; rerun request validation');
   const latest = (await control.rest.pulls.get({ owner, repo, pull_number: number })).data;
   if (latest.head.sha !== head || latest.base.sha !== pullRequest.base.sha) throw new Error('Pull request changed during preview; rerun validation');
-  const lock = await fs.readFile(path.join(root, 'terraform/.terraform.lock.hcl'), 'utf8');
+  const lock = await fs.readFile(path.join(engine, 'terraform/.terraform.lock.hcl'), 'utf8');
   const review = { number, head, base: pullRequest.base.sha, config_digest: digest(after.catalog), policy_digest: digest(after.policy), lock_digest: digest(lock), state_version: stateBefore.version, changed, intents };
   await saveReview(review);
   await comment(control, owner, repo, number, `### Repository request\n\nCommit: \`${head}\`\n\n${describeIntents(intents)}\n\nMerge this PR after the configuration and these changes have been approved.`);
@@ -65,7 +65,7 @@ async function request() {
 async function apply() {
   const { policy, owner, repo } = await input();
   if (process.env.GITHUB_REF !== 'refs/heads/main') throw new Error('Apply is restricted to main');
-  if (process.env.AUTOMATION_ENABLED !== 'true') throw new Error('Organization automation is not configured; administrator must complete docs/setup.md');
+  if (process.env.AUTOMATION_ENABLED !== 'true') throw new Error('Organization automation is not configured; administrator must complete repositories/docs/setup.md');
   const client = github();
   control = github(process.env.CONTROL_TOKEN);
   const sha = process.env.GITHUB_SHA;
@@ -90,7 +90,7 @@ async function apply() {
     if (changed.length) {
       const saved = await store.get(`reviews/${pullRequest.number}/${pullRequest.head.sha}.json`, true);
       review = saved?.data ?? await loadReview(control, owner, repo, pullRequest.number, pullRequest.head.sha, base);
-      const lock = await fs.readFile(path.join(root, 'terraform/.terraform.lock.hcl'), 'utf8');
+      const lock = await fs.readFile(path.join(engine, 'terraform/.terraform.lock.hcl'), 'utf8');
       if (review.number !== pullRequest.number || review.head !== pullRequest.head.sha || review.base !== base || review.source_sha !== base || review.config_digest !== digest(catalog) || review.policy_digest !== digest(policy) || review.lock_digest !== digest(lock)) throw new Error('Merged configuration differs from the validated PR');
       if (applied?.data.sha !== review.base && applied?.data.sha !== sha) throw new Error('The preceding approved commit has not finished applying');
       if (!saved) await store.put(`reviews/${pullRequest.number}/${pullRequest.head.sha}.json`, review);
@@ -129,7 +129,7 @@ try {
   if (pullRequest && control) {
     const policy = await loadPolicy();
     if (command === 'request') await status(control, policy.organization, policy.management_repository, pullRequest.head.sha, 'failure', error.message, 'request/check').catch(() => {});
-    await comment(control, policy.organization, policy.management_repository, pullRequest.number, `### ${command === 'request' ? 'Request validation' : 'Repository automation'} failed\n\n${error.message}\n\nInspect the Actions run and [recovery guide](https://github.com/gevico/repos/blob/main/docs/operations.md).`).catch(() => {});
+    await comment(control, policy.organization, policy.management_repository, pullRequest.number, `### ${command === 'request' ? 'Request validation' : 'Repository automation'} failed\n\n${error.message}\n\nInspect the Actions run and [recovery guide](https://github.com/gevico/repos/blob/main/repositories/docs/operations.md).`).catch(() => {});
   }
   process.exitCode = 1;
 } finally {
