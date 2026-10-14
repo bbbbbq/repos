@@ -2,6 +2,10 @@
 
 验证日期：2026 年 10 月 14 日。
 
+配置渲染与程序检查已在空 Git 配置环境中通过。渲染只生成仓库参数；执行工作目录通过真实 Git 配置取得提交姓名和邮箱。
+
+生产状态的只读预览已核验：唯一变更是 `demo` 的内部 `archive_on_destroy` 策略从 `true` 调整为 `false`，仓库属性、授权和保护规则保持一致。维护 PR 合并后的 Apply 执行该迁移。
+
 ## GitHub Actions
 
 [Check 执行记录](https://github.com/gevico/repos/actions/runs/38498223351) 在 GitHub 托管 Linux runner 上完成配置校验、程序测试、Git 后端构建、Terraform 格式与配置检查。
