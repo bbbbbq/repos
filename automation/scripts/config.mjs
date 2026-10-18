@@ -53,11 +53,13 @@ export async function loadPolicy(directory = engine) {
   if (!policy.administrator_users?.length && !policy.administrator_teams?.length) {
     throw new Error('policy.yml must define repository administrators');
   }
-  for (const key of ['administrator_users', 'administrator_teams', 'allowed_teams', 'allowed_templates', 'allowed_mirror_hosts', 'reserved_names']) {
+  for (const key of ['administrator_users', 'administrator_teams', 'allowed_teams', 'allowed_templates', 'allowed_mirror_hosts', 'allowed_licenses', 'reserved_names']) {
     if (!Array.isArray(policy[key]) || policy[key].some((item) => typeof item !== 'string')) {
       throw new Error(`policy.yml: ${key} must be an array of strings`);
     }
   }
+  const licenses = JSON.parse(await fs.readFile(path.join(engine, 'schema/repository.schema.json'), 'utf8')).properties.license.enum;
+  if (policy.allowed_licenses.some((key) => !licenses.includes(key))) throw new Error('policy.yml: allowed_licenses must use GitHub license keys from repository.schema.json');
   if (policy.default_branch !== 'main' || typeof policy.private_branch_protection !== 'boolean' || typeof policy.require_pull_request_reviews !== 'boolean') {
     throw new Error('policy.yml: invalid branch policy');
   }
@@ -171,7 +173,7 @@ export function effectiveAccess(request, policy) {
   return { users, teams };
 }
 
-export function checkTransition(before, after) {
+export function checkTransition(before, after, policy) {
   let lifecycle = false;
   for (const name of Object.keys(before)) {
     if (!after[name]) throw new Error(`${name}: removing or renaming a managed repository is prohibited`);
@@ -190,7 +192,10 @@ export function checkTransition(before, after) {
     }
   }
   for (const [name, request] of Object.entries(after)) {
-    if (!before[name] && (repositoryStatus(request) !== 'active' || (repositoryMode(request) !== 'existing' && request.repository_id))) throw new Error(`${name}: new declarations must be active and use repository_id only for mode existing`);
+    if (before[name]) continue;
+    if (repositoryStatus(request) !== 'active' || (repositoryMode(request) !== 'existing' && request.repository_id)) throw new Error(`${name}: new declarations must be active and use repository_id only for mode existing`);
+    // Registered repositories keep their license after the allowed list changes.
+    if (request.license && !policy.allowed_licenses.includes(request.license)) throw new Error(`${name}: license ${request.license} is not allowed by policy.yml`);
   }
   if (lifecycle && changedNames(before, after).some((name) => !before[name] || repositoryStatus(before[name]) === repositoryStatus(after[name]))) throw new Error('Lifecycle requests must be submitted separately from creation or configuration changes');
   return { lifecycle };

@@ -18,7 +18,7 @@
 - `fork`：来源 `owner`、`repository`、`source_repository_id` 和可选的 `default_branch_only`。
 - `mirror`：镜像来源的克隆地址 `url`；来源位于 github.com 时同时填写 `source_repository_id`。
 - `readme_template`：新仓库或新 Fork 初始化时使用 `project`、`library` 或 `minimal`。
-- `license`：普通新建仓库采用 GitHub 许可证名称，例如 `mit`、`apache-2.0`、`bsd-3-clause` 或 `gpl-3.0`。
+- `license`：可选。普通新建仓库从政策的 `allowed_licenses` 中选择一个 GitHub 许可证名称；省略时仓库不包含许可证。
 
 角色含义：`pull` 读取内容，`triage` 管理议题与 PR，`push` 写入内容，`maintain` 维护仓库，`admin` 管理仓库设置与授权。
 
@@ -59,6 +59,22 @@ npm --prefix automation run request -- \
 Fork 命令绑定真实来源 ID 和默认分支，合并后由 GitHub Fork API 建立关联，再由 Terraform 登记并设置权限和保护规则。公开 Fork 的可见性保持与来源一致；当前组织套餐支持公开 Fork。跨组织 Fork 需要配置 production 的 `FORK_USER_TOKEN`，见[管理员配置](setup.md)。
 
 README 模板保存在 `automation/templates/readme/`，在仓库初始化时写入。初始化完成后的 README 内容由仓库维护者编辑。普通新建仓库可以选择许可证；Fork 和仓库模板继承来源文件中的许可证。初始化模式、来源、README 模板和许可证在登记后保持稳定。
+
+许可证由 GitHub 在创建仓库时生成 `LICENSE` 文件，申请时可以选择不带许可证。可选范围是 `automation/policy.yml` 的 `allowed_licenses`：
+
+| 名称 | 许可证 |
+| --- | --- |
+| `mit` | MIT License |
+| `apache-2.0` | Apache License 2.0 |
+| `bsd-2-clause` | BSD 2-Clause "Simplified" License |
+| `bsd-3-clause` | BSD 3-Clause "New" or "Revised" License |
+| `gpl-2.0` | GNU General Public License v2.0 |
+| `gpl-3.0` | GNU General Public License v3.0 |
+| `lgpl-2.1` | GNU Lesser General Public License v2.1 |
+| `mpl-2.0` | Mozilla Public License 2.0 |
+| `cc0-1.0` | Creative Commons Zero v1.0 Universal |
+
+管理员通过维护 PR 调整该清单，清单只能使用 Schema 列出的 GitHub 常用许可证名称。清单只约束新申请，已登记仓库保留原有许可证。
 
 ## 镜像复制
 

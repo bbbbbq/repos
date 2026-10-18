@@ -40,7 +40,7 @@
 - `status` 与 `repository_id`：声明可写、归档或删除状态，为已有仓库和生命周期操作绑定数字 ID。
 - `fork` 与 `default_branch`：绑定来源 ID、Fork 范围和默认分支。
 - `mirror`：绑定镜像来源的 HTTPS 克隆地址；来源位于 github.com 时同时绑定仓库 ID。来源主机由政策的 `allowed_mirror_hosts` 限定。
-- `readme_template` 与 `license`：新仓库初始化内容；许可证选择用于普通新建仓库。
+- `readme_template` 与 `license`：新仓库初始化内容；许可证选择用于普通新建仓库，可以省略，范围由政策的 `allowed_licenses` 限定。
 
 权限角色支持 `pull`、`triage`、`push`、`maintain`、`admin`。每个仓库必须指定维护负责人：个人或团队取得 `maintain` 或 `admin` 权限。管理端始终为政策中的管理员设置 `admin` 权限。
 

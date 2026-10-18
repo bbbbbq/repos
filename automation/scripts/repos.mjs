@@ -67,7 +67,9 @@ async function main() {
       request.fork = { owner, repository, source_repository_id: source.id, default_branch_only: values['default-branch-only'] };
     }
     await validateRequest(request, policy, `${request.name}.yaml`);
-    if ((await loadCatalog()).catalog[request.name]) throw new Error(`${request.name} already has a request; edit the existing file`);
+    const { catalog } = await loadCatalog();
+    if (catalog[request.name]) throw new Error(`${request.name} already has a request; edit the existing file`);
+    checkTransition(catalog, { ...catalog, [request.name]: request }, policy);
     process.stdout.write(requestYaml(request));
     return;
   }
@@ -88,7 +90,7 @@ async function main() {
     for (const identity of values['remove-user']) delete request.access.users[identity];
     for (const identity of values['remove-team']) delete request.access.teams[identity];
     await validateRequest(request, policy, requestPath(request));
-    if (previous) checkTransition(catalog, { ...catalog, [request.name]: request });
+    if (previous) checkTransition(catalog, { ...catalog, [request.name]: request }, policy);
     process.stdout.write(requestYaml(request));
     return;
   }
@@ -102,7 +104,7 @@ async function main() {
     if (!repository || (previous.repository_id && previous.repository_id !== repository.id)) throw new Error(`${previous.name}: the existing repository ID could not be verified`);
     const request = { ...previous, status: values.status, repository_id: repository.id };
     await validateRequest(request, policy, requestPath(request));
-    checkTransition(catalog, { ...catalog, [request.name]: request });
+    checkTransition(catalog, { ...catalog, [request.name]: request }, policy);
     process.stdout.write(requestYaml(request));
     return;
   }

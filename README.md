@@ -74,7 +74,7 @@ access:
 
 这是配置格式示例。实际申请中的名称、维护负责人和权限来自用户描述及组织政策。当前管理账号 `zevorn` 保留管理权限。
 
-可用角色为 `pull`、`triage`、`push`、`maintain` 和 `admin`。团队使用现有组织团队的 slug。模板来源由管理员清单控制。[查看字段与权限说明](automation/docs/requesting.md)
+可用角色为 `pull`、`triage`、`push`、`maintain` 和 `admin`。团队使用现有组织团队的 slug。模板来源和可选许可证由管理员清单控制；新仓库也可以不带许可证。[查看字段与权限说明](automation/docs/requesting.md)
 
 ## Actions 执行仓库管理
 

@@ -30,8 +30,8 @@ test('mirror requests bind an allowed HTTPS source and exclude initialization te
 });
 
 test('mirror sources are immutable and render as uninitialized managed repositories', () => {
-  assert.throws(() => checkTransition({ 'qemu-mirror': mirror }, { 'qemu-mirror': { ...mirror, mirror: { url: 'https://gitee.com/qemu/qemu.git' } } }), /mirror is immutable/);
-  checkTransition({ 'qemu-mirror': mirror }, { 'qemu-mirror': { ...mirror, access: { users: { zevorn: 'admin', bbbbbq: 'maintain' }, teams: {} } } });
+  assert.throws(() => checkTransition({ 'qemu-mirror': mirror }, { 'qemu-mirror': { ...mirror, mirror: { url: 'https://gitee.com/qemu/qemu.git' } } }, policy), /mirror is immutable/);
+  checkTransition({ 'qemu-mirror': mirror }, { 'qemu-mirror': { ...mirror, access: { users: { zevorn: 'admin', bbbbbq: 'maintain' }, teams: {} } } }, policy);
   const values = terraformValues({ 'qemu-mirror': mirror }, policy).repositories['qemu-mirror'];
   assert.equal(values.mode, 'mirror');
   assert.equal(values.readme, null);

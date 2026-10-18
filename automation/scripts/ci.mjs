@@ -76,7 +76,7 @@ async function request() {
   const reader = await readSession();
   const before = await remoteCatalog(control, owner, repo, pullRequest.base.sha, path.join(work, 'base'));
   const after = await remoteCatalog(control, owner, repo, head, path.join(work, 'head'));
-  const { lifecycle } = checkTransition(before.catalog, after.catalog);
+  const { lifecycle } = checkTransition(before.catalog, after.catalog, after.policy);
   const changed = changedNames(before.catalog, after.catalog);
   store = await StateStore.open();
   const applied = await store.get('applied.json', true);
@@ -136,7 +136,7 @@ async function apply() {
     const base = commit.parents[0]?.sha;
     if (!base) throw new Error('Merged commit must have an approved base commit');
     const before = await remoteCatalog(control, owner, repo, base, path.join(work, 'base'));
-    transition = checkTransition(before.catalog, catalog);
+    transition = checkTransition(before.catalog, catalog, policy);
     const changed = changedNames(before.catalog, catalog);
     if (changed.length) {
       const saved = await store.get(`reviews/${pullRequest.number}/${pullRequest.head.sha}.json`, true);
