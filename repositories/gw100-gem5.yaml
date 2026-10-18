@@ -4,5 +4,5 @@ visibility: public
 topics: []
 access:
   users:
-    bbbbbq: maintain
+    bbbbbq: admin
   teams: {}
