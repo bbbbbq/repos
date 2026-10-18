@@ -4,6 +4,7 @@ import { parseArgs } from 'node:util';
 import { root, loadCatalog, loadPolicy, validateRequest, requestYaml, terraformValues, writeJson, repositoryStatus, requestPath, checkTransition } from './config.mjs';
 import { github, inspectCatalog, findRepository } from './github.mjs';
 import { existingRequest } from './onboarding.mjs';
+import { resolveMirror } from './mirror.mjs';
 
 function assignment(value) {
   const [identity, role, extra] = value.split(':');
@@ -21,6 +22,7 @@ async function main() {
     name: { type: 'string' },
     status: { type: 'string' },
     fork: { type: 'string' },
+    mirror: { type: 'string' },
     'default-branch-only': { type: 'boolean', default: false },
     'readme-template': { type: 'string' },
     license: { type: 'string' },
@@ -53,6 +55,8 @@ async function main() {
       ...(values['readme-template'] ? { readme_template: values['readme-template'] } : {}),
       ...(values.license ? { license: values.license } : {}),
     };
+    if (values.fork && values.mirror) throw new Error('Use either --fork or --mirror');
+    if (values.mirror) Object.assign(request, { mode: 'mirror', ...(await resolveMirror(values.mirror, policy)) });
     if (values.fork) {
       const [owner, repository, extra] = values.fork.split('/');
       if (!owner || !repository || extra) throw new Error('--fork requires owner/repository');
