@@ -11,6 +11,7 @@
 - `description`：说明仓库保存的内容和用途。
 - `visibility`：`public` 或 `private`；自然语言申请默认采用 `public`。私有仓库需要管理政策中已核实的分支保护能力。
 - `topics`：可选的主题列表。
+- `ruleset.admin_bypass`：可选，`none`、`pull_request` 或 `always`；默认 `none`。`pull_request` 允许管理员在合并 PR 时绕过评审，`always` 还允许直接推送。已有仓库（`mode: existing`）保留现有分支规则，不能设置这个字段。
 - `access.users`：GitHub 用户名与角色的映射。
 - `access.teams`：GitHub 团队 slug 与角色的映射，团队须在政策的允许清单中。
 - `template`：可选的 `owner` 和 `repository`，完整来源须在模板清单中。

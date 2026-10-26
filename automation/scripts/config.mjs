@@ -26,6 +26,12 @@ export function defaultBranch(request, policy) {
   return request.default_branch ?? policy.default_branch;
 }
 
+export function repositoryRules(request) {
+  return {
+    admin_bypass: request.ruleset?.admin_bypass ?? 'none',
+  };
+}
+
 export function renderReadme(request) {
   if (!request.readme_template) return null;
   const template = readFileSync(path.join(engine, 'templates/readme', `${request.readme_template}.md`), 'utf8');
@@ -84,6 +90,7 @@ export async function validateRequest(request, policy, filename) {
   if (request.template && mode !== 'create') throw new Error(`${filename}: repository templates require mode create`);
   if (request.license && (mode !== 'create' || request.template)) throw new Error(`${filename}: license selection requires a new repository without a repository template`);
   if (request.readme_template && mode === 'existing') throw new Error(`${filename}: existing requests manage access and lifecycle; README templates initialize new repositories`);
+  if (request.ruleset && mode === 'existing') throw new Error(`${filename}: existing requests preserve branch rules; omit ruleset`);
   if (request.default_branch && (request.default_branch.startsWith('/') || request.default_branch.includes('..') || request.default_branch.includes('\\') || request.default_branch.includes('\n'))) throw new Error(`${filename}: invalid default branch`);
   if (mode !== 'existing' && request.visibility === 'private' && !policy.private_branch_protection) {
     throw new Error(`${filename}: private repositories require an organization plan with branch protection; enable the verified capability in policy.yml`);
@@ -204,6 +211,7 @@ export function terraformValues(catalog, policy) {
       visibility: request.visibility,
       topics: request.topics ?? [],
       template: request.template ?? null,
+      ruleset: repositoryRules(request),
       ...effectiveAccess(request, policy),
     }])),
     require_pull_request_reviews: policy.require_pull_request_reviews,

@@ -24,6 +24,9 @@ variable "repositories" {
     topics         = list(string)
     users          = map(string)
     teams          = map(string)
+    ruleset = object({
+      admin_bypass = string
+    })
     template = optional(object({
       owner      = string
       repository = string

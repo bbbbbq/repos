@@ -4,7 +4,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { root, engine, work, loadPolicy, loadCatalog, parseYaml, validateRequest, checkTransition, effectiveAccess, terraformValues, requestYaml } from '../scripts/config.mjs';
+import { root, engine, work, loadPolicy, loadCatalog, parseYaml, validateRequest, checkTransition, effectiveAccess, terraformValues, requestYaml, repositoryRules } from '../scripts/config.mjs';
+import { authorizePlan } from '../scripts/plan-policy.mjs';
 
 const execute = promisify(execFile);
 const policy = await loadPolicy();
@@ -16,6 +17,12 @@ const request = {
   access: { users: { zevorn: 'admin' }, teams: { 'ai_infra-pigpig-runrun': 'maintain' } },
 };
 
+test('plan policy module parses and exports its entry points', async () => {
+  const module = await import('../scripts/plan-policy.mjs');
+  assert.equal(typeof module.authorizePlan, 'function');
+  assert.equal(typeof module.describeIntents, 'function');
+});
+
 test('request rendering preserves user, team and topic intent through YAML and Terraform input', async () => {
   const { stdout } = await execute(process.execPath, [path.join(engine, 'scripts/repos.mjs'), 'request', '--name', 'coach', '--description', request.description, '--maintainer', 'zevorn', '--team', 'ai_infra-pigpig-runrun:maintain', '--topic', 'qemu'], { cwd: root });
   const rendered = parseYaml(stdout, 'coach.yaml');
@@ -26,6 +33,40 @@ test('request rendering preserves user, team and topic intent through YAML and T
   assert.deepEqual(values.repositories.coach.users, { zevorn: 'admin' });
   assert.deepEqual(values.repositories.coach.teams, { 'ai_infra-pigpig-runrun': 'maintain' });
   assert.equal(values.repositories.coach.template, null);
+});
+
+test('ruleset overrides stay scoped to the named repository', async () => {
+  assert.deepEqual(repositoryRules(request), { admin_bypass: 'none' });
+  const gw100 = { ...request, name: 'gw100-gem5', ruleset: { admin_bypass: 'pull_request' } };
+  assert.deepEqual(repositoryRules(gw100), { admin_bypass: 'pull_request' });
+  await validateRequest(gw100, policy, 'repositories/gw100-gem5.yaml');
+  await assert.rejects(validateRequest({ ...gw100, ruleset: { admin_bypass: 'sometimes' } }, policy, 'repositories/gw100-gem5.yaml'), /admin_bypass|allowed/);
+  await assert.rejects(validateRequest({ ...gw100, mode: 'existing', repository_id: 1 }, policy, 'repositories/gw100-gem5.yaml'), /branch rules|ruleset/);
+  const values = terraformValues({ coach: request, 'gw100-gem5': gw100 }, policy);
+  assert.deepEqual(values.repositories.coach.ruleset, { admin_bypass: 'none' });
+  assert.deepEqual(values.repositories['gw100-gem5'].ruleset, { admin_bypass: 'pull_request' });
+});
+
+test('plan authorization accepts the expected ruleset admin bypass', () => {
+  const gw100 = { ...request, name: 'gw100-gem5', ruleset: { admin_bypass: 'pull_request' } };
+  const rules = [{ deletion: true, non_fast_forward: true, pull_request: [{ required_approving_review_count: 1, dismiss_stale_reviews_on_push: true, require_last_push_approval: true }] }];
+  const conditions = [{ ref_name: [{ include: ['~DEFAULT_BRANCH'], exclude: [] }] }];
+  const plan = {
+    resource_changes: [{
+      address: 'github_repository_ruleset.managed["gw100-gem5"]',
+      type: 'github_repository_ruleset',
+      name: 'managed',
+      index: 'gw100-gem5',
+      change: {
+        actions: ['update'],
+        before: { repository: 'gw100-gem5', name: 'review-default-branch', enforcement: 'active', target: 'branch', conditions, rules, bypass_actors: [] },
+        after: { repository: 'gw100-gem5', name: 'review-default-branch', enforcement: 'active', target: 'branch', conditions, rules, bypass_actors: [{ actor_id: 5, actor_type: 'RepositoryRole', bypass_mode: 'pull_request' }] },
+      },
+    }],
+  };
+  const intents = authorizePlan(plan, { 'gw100-gem5': gw100 }, policy, ['gw100-gem5']);
+  assert.equal(intents.length, 1);
+  assert.deepEqual(intents[0].after.bypass_actors, [{ actor_id: 5, actor_type: 'RepositoryRole', bypass_mode: 'pull_request' }]);
 });
 
 test('configuration rejects ambiguous YAML and permission policy changes', async () => {
