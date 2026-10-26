@@ -85,6 +85,8 @@ npm --prefix automation run bootstrap -- --configure
 
 配置包括 `main` 的必需审核、CODEOWNERS 审核、最新修改批准、严格更新要求，以及 `Validate` 和 `request/check` 必需检查。`preview` 和 `production` 环境限定部署分支为 `main`。审核者须能够独立审核申请人的 PR。
 
+仓库申请 YAML 可以用可选的 `ruleset.admin_bypass` 调整默认分支规则。默认是 `none`；`pull_request` 允许仓库管理员在合并 PR 时绕过审核和检查，但直接推送仍受保护，默认分支的删除保护也保持不变；`always` 会同时允许直接推送，只应在明确需要时使用。
+
 管理仓库允许普通合并（Create a merge commit），保留原始提交历史。压缩合并作为可选方法；申请人和审核者可以在 PR 中选择合并方法，程序支持这两种方法产生的合并提交。
 
 ## 初始化自动化

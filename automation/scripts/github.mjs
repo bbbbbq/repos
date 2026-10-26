@@ -3,7 +3,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { Octokit } from '@octokit/rest';
 import { retry } from '@octokit/plugin-retry';
-import { root, parseYaml, validateRequest, loadPolicy, effectiveAccess, isRepositoryRequest, repositoryStatus, repositoryMode, defaultBranch } from './config.mjs';
+import { root, parseYaml, validateRequest, loadPolicy, effectiveAccess, isRepositoryRequest, repositoryStatus, repositoryMode, defaultBranch, repositoryRules, stableJson } from './config.mjs';
 
 const Client = Octokit.plugin(retry);
 export function github(token = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN) {
@@ -145,8 +145,17 @@ export async function verifyCatalog(client, catalog, policy) {
     if (!ruleset) throw new Error(`${request.name}: default branch ruleset is missing`);
     const { data: protection } = await client.rest.repos.getRepoRuleset({ owner: policy.organization, repo: request.name, ruleset_id: ruleset.id });
     const rules = protection.rules.map((rule) => rule.type);
+    const expectedRules = repositoryRules(request);
     if (!rules.includes('deletion') || !rules.includes('non_fast_forward') || !protection.conditions?.ref_name?.include?.includes('~DEFAULT_BRANCH')) {
       throw new Error(`${request.name}: branch protection rules differ from the management policy`);
+    }
+    if (!Array.isArray(protection.bypass_actors)) {
+      throw new Error(`${request.name}: ruleset bypass actors are unavailable; verification requires write access to the ruleset`);
+    }
+    const actualBypass = protection.bypass_actors.map((actor) => ({ actor_id: Number(actor.actor_id), actor_type: actor.actor_type, bypass_mode: actor.bypass_mode })).sort((a, b) => stableJson(a).localeCompare(stableJson(b)));
+    const expectedBypass = expectedRules.admin_bypass === 'none' ? [] : [{ actor_id: 5, actor_type: 'RepositoryRole', bypass_mode: expectedRules.admin_bypass }];
+    if (stableJson(actualBypass) !== stableJson(expectedBypass)) {
+      throw new Error(`${request.name}: ruleset bypass actors differ from the management policy`);
     }
     if (policy.require_pull_request_reviews) {
       const review = protection.rules.find((rule) => rule.type === 'pull_request');
