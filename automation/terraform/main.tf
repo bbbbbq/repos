@@ -148,5 +148,14 @@ resource "github_repository_ruleset" "managed" {
     }
   }
 
+  dynamic "bypass_actors" {
+    for_each = each.value.ruleset.admin_bypass == "none" ? [] : [each.value.ruleset.admin_bypass]
+    content {
+      actor_id    = 5
+      actor_type  = "RepositoryRole"
+      bypass_mode = bypass_actors.value
+    }
+  }
+
   depends_on = [github_branch_default.managed, github_repository_collaborators.managed, github_repository_file.readme]
 }

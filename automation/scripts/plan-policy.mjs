@@ -1,4 +1,4 @@
-import { effectiveAccess, stableJson, repositoryStatus, repositoryMode, defaultBranch, renderReadme } from './config.mjs';
+import { effectiveAccess, stableJson, repositoryStatus, repositoryMode, defaultBranch, renderReadme, repositoryRules } from './config.mjs';
 
 const fields = {
   github_repository: ['name', 'description', 'visibility', 'topics', 'archived', 'archive_on_destroy', 'repo_id'],
@@ -34,6 +34,7 @@ function projection(type, value) {
       review_count: review?.required_approving_review_count ?? 0,
       dismiss_stale_reviews: review?.dismiss_stale_reviews_on_push ?? false,
       require_last_push_approval: review?.require_last_push_approval ?? false,
+      bypass_actors: (value.bypass_actors ?? []).map((item) => ({ actor_id: item.actor_id, actor_type: item.actor_type, bypass_mode: item.bypass_mode })).sort((a, b) => stableJson(a).localeCompare(stableJson(b))),
     };
   }
   return result;
@@ -98,7 +99,11 @@ export function authorizePlan(plan, catalog, policy, allowedNames, approval = nu
       const expected = effectiveAccess(request, policy);
       if (after.repository !== name || stableJson(after.user) !== stableJson(expected.users) || stableJson(after.team) !== stableJson(expected.teams)) throw new Error(`Unexpected permission changes for ${name}`);
     }
-    if (resource.type === 'github_repository_ruleset' && (after.repository !== name || after.name !== 'review-default-branch' || after.enforcement !== 'active' || after.target !== 'branch' || stableJson(after.include) !== stableJson(['~DEFAULT_BRANCH']) || after.exclude.length || !after.deletion || !after.non_fast_forward || after.review_count !== (policy.require_pull_request_reviews ? 1 : 0) || (policy.require_pull_request_reviews && (!after.dismiss_stale_reviews || !after.require_last_push_approval)))) throw new Error(`Unexpected ruleset for ${name}`);
+    if (resource.type === 'github_repository_ruleset') {
+      const expected = repositoryRules(request);
+      const expectedBypass = expected.admin_bypass === 'none' ? [] : [{ actor_id: 5, actor_type: 'RepositoryRole', bypass_mode: expected.admin_bypass }];
+      if (after.repository !== name || after.name !== 'review-default-branch' || after.enforcement !== 'active' || after.target !== 'branch' || stableJson(after.include) !== stableJson(['~DEFAULT_BRANCH']) || after.exclude.length || !after.deletion || !after.non_fast_forward || after.review_count !== (policy.require_pull_request_reviews ? 1 : 0) || (policy.require_pull_request_reviews && (!after.dismiss_stale_reviews || !after.require_last_push_approval)) || stableJson(after.bypass_actors) !== stableJson(expectedBypass)) throw new Error(`Unexpected ruleset for ${name}`);
+    }
     }
     const intent = { address: resource.address, type: resource.type, name, actions, before, after, ...(importing ? { importing } : {}) };
     if (approval && !migration) {

@@ -32,6 +32,13 @@
       }
     },
     "visibility": { "enum": ["public", "private"] },
+    "ruleset": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "admin_bypass": { "enum": ["none", "pull_request", "always"] }
+      }
+    },
     "topics": { "type": "array", "maxItems": 20, "uniqueItems": true, "items": { "type": "string", "maxLength": 50, "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" } },
     "access": {
       "type": "object",

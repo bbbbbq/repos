@@ -173,7 +173,8 @@ async function apply() {
   authorizePlan(plan, catalog, policy, review?.changed ?? [], review?.intents ?? [], { allowMigration: !review, lifecycle: transition.lifecycle, initializedIds });
   await inspectCatalog(reader, catalog, policy, currentState, [...records, ...Object.entries(initializedIds).filter(([name]) => !records.some((item) => item.name === name)).map(([name, id]) => ({ name, id, origin: `${repositoryMode(catalog[name])}-init` }))]);
   await terraformApply(directory);
-  const result = await verifyCatalog(reader, catalog, policy);
+  // GitHub exposes ruleset bypass actors only to callers with ruleset write access.
+  const result = await verifyCatalog(writer.client, catalog, policy);
   if (applied?.data.sha !== sha) await initialFiles(reader, catalog, review);
   await store.put('applied.json', { sha, repositories: result, applied_at: new Date().toISOString(), run_id: process.env.GITHUB_RUN_ID });
   await writeJson(path.join(work, 'result.json'), result);

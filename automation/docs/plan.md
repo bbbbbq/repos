@@ -97,7 +97,7 @@ flowchart TD
 3. 刷新 GitHub 实际状态，生成执行计划，检查计划只涉及已批准配置的资源和字段。
 4. Provider 创建普通仓库。GitHub Fork API 创建 Fork，保存返回 ID 后由 Terraform import 登记。镜像复制通过 REST API 创建空仓库并关闭 Actions，用 git 推送预览快照中的分支和标签，保存 ID 后由 Terraform import 登记。已有仓库在计划中导入。新仓库默认分支为 `main`，Fork 和镜像仓库保留来源默认分支。
 5. 设置管理团队、申请团队和个人协作者的权限。
-6. 设置目标仓库的默认分支保护，要求通过 PR 合并、经过审核，并保护分支免受删除和强制推送。私有仓库的规则以组织已开通的 GitHub 套餐能力为部署条件。
+6. 设置目标仓库的默认分支保护，要求通过 PR 合并、经过审核，并保护分支免受删除和强制推送。仓库申请中的 `ruleset.admin_bypass` 可以配置管理员在合并 PR 时绕过审核；私有仓库的规则以组织已开通的 GitHub 套餐能力为部署条件。
 7. 通过 GitHub API 核验仓库属性、默认分支、直接权限和邀请状态，记录 Terraform 状态及执行结果。
 
 普通创建使用 `github_repository`、`auto_init` 和可选的 `license_template`；仓库模板使用 `template`。README 由 Mustache 渲染，并由 `github_repository_file` 在初始化时写入。默认分支与 README 完成后添加保护规则。[仓库资源](https://github.com/integrations/terraform-provider-github/blob/v6.13.0/docs/resources/repository.md)、[文件资源](https://github.com/integrations/terraform-provider-github/blob/v6.13.0/docs/resources/repository_file.md)
